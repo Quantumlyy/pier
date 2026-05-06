@@ -2,8 +2,10 @@ import { Elysia } from 'elysia'
 
 import { TDomainsResponse, TRollQuery, TSearchQuery } from '../lib/schemas.ts'
 import { toMarketplaceDomain } from '../lib/shape.ts'
+import type { ENSNodeDomain } from '../lib/types.ts'
 import {
   browseRecent,
+  getDomainByName,
   getExpiryDates,
   searchByContains,
   searchByPrefix,
@@ -28,6 +30,23 @@ const normalizeName = (raw: string | undefined): string => {
   return trimmed.endsWith('.eth') ? trimmed.slice(0, -'.eth'.length) : trimmed
 }
 
+// `name_starts_with` ordered alphabetically puts every "${name}-..." domain
+// (hyphen 0x2D < period 0x2E) before "${name}.eth", so the exact registered
+// name routinely falls off the first page. The frontend reads its absence as
+// "unregistered" and offers to register a name someone already owns. On the
+// first page, fetch the exact match in parallel and prepend it.
+const withExactPrepended = async (
+  fetcher: () => Promise<ENSNodeDomain[]>,
+  fullName: string,
+  limit: number,
+  offset: number,
+): Promise<ENSNodeDomain[]> => {
+  if (offset !== 0) return fetcher()
+  const [exact, page] = await Promise.all([getDomainByName(fullName), fetcher()])
+  if (!exact || page.some((d) => d.name === fullName)) return page
+  return [exact, ...page].slice(0, limit)
+}
+
 export const searchRoutes = new Elysia({ tags: ['search'] })
   .get(
     '/search/plain',
@@ -37,14 +56,22 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       // Empty name = the frontend's default marketplace / filter-only browse;
       // return a recent-first page rather than nothing.
       const domains = name
-        ? await searchByPrefix(name, limit, offset)
+        ? await withExactPrepended(
+            () => searchByPrefix(name, limit, offset),
+            `${name}.eth`,
+            limit,
+            offset,
+          )
         : await browseRecent(limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
       query: TSearchQuery,
       response: TDomainsResponse,
-      detail: { summary: 'Prefix-match search; empty name returns recent registrations' },
+      detail: {
+        summary:
+          'Prefix-match search with the exact match prepended; empty name returns recent registrations',
+      },
     },
   )
   .get(
@@ -54,7 +81,12 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       const name = normalizeName(query.name)
       const { limit, offset } = parsePagination(query.limit, query.offset)
       const domains = name
-        ? await searchByContains(name, limit, offset)
+        ? await withExactPrepended(
+            () => searchByContains(name, limit, offset),
+            `${name}.eth`,
+            limit,
+            offset,
+          )
         : await browseRecent(limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },

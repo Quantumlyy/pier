@@ -223,13 +223,57 @@ describe('GET /search/plain', () => {
     expect(r.body.domains).toHaveLength(1)
     expect(r.body.domains[0]?.name).toBe('vital.eth')
     expect(r.body.domains[0]?.name_ens).toBe('vital')
-    expect(calls[0]?.body?.variables.prefix).toBe('vital')
+    const prefixCall = calls.find((c) => c.body?.variables.prefix !== undefined)
+    expect(prefixCall?.body?.variables.prefix).toBe('vital')
   })
 
   test('strips trailing .eth before searching', async () => {
     const { calls } = installFetch(() => gqlOk({ domains: [] }))
     await json(req.get('/search/plain?name=vitalik.eth&limit=1'))
-    expect(calls[0]?.body?.variables.prefix).toBe('vitalik')
+    const prefixCall = calls.find((c) => c.body?.variables.prefix !== undefined)
+    expect(prefixCall?.body?.variables.prefix).toBe('vitalik')
+  })
+
+  test('prepends the exact match on the first page', async () => {
+    let n = 0
+    installFetch(({ body }) => {
+      n++
+      // First call is searchByPrefix and getDomainByName in parallel; we
+      // distinguish them by which variable is present.
+      if (body?.variables.prefix !== undefined) {
+        // Prefix page returns a couple of hyphenated names ahead of the exact match
+        return gqlOk({
+          domains: [ensDomain('vital-foo.eth'), ensDomain('vital-bar.eth')],
+        })
+      }
+      // getDomainByName lookup
+      return gqlOk({ domains: [ensDomain('vital.eth')] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=2&offset=0'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
+    expect(n).toBe(2)
+  })
+
+  test('does not duplicate the exact match if it is already in the prefix page', async () => {
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({ domains: [ensDomain('vital.eth'), ensDomain('vital-foo.eth')] })
+      }
+      return gqlOk({ domains: [ensDomain('vital.eth')] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=5&offset=0'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
+  })
+
+  test('does not fetch the exact match for offset > 0', async () => {
+    const { calls } = installFetch(() => gqlOk({ domains: [] }))
+    await json(req.get('/search/plain?name=vital&limit=10&offset=10'))
+    const exactCall = calls.find((c) => c.body?.variables.name === 'vital.eth')
+    expect(exactCall).toBeUndefined()
   })
 })
 
@@ -238,7 +282,8 @@ describe('GET /search/similar', () => {
     const { calls } = installFetch(() => gqlOk({ domains: [ensDomain('foo.eth')] }))
     const r = await json(req.get('/search/similar?name=oo&limit=1'))
     expect(r.status).toBe(200)
-    expect(calls[0]?.body?.variables.needle).toBe('oo')
+    const containsCall = calls.find((c) => c.body?.variables.needle !== undefined)
+    expect(containsCall?.body?.variables.needle).toBe('oo')
   })
 })
 

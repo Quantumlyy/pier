@@ -201,5 +201,5 @@ query GetDomainByName($name: String!) {
 export const getDomainByName = (name: string): Promise<ENSNodeDomain | null> =>
   cached('getDomainByName', { name }, async () => {
     const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAIN_BY_NAME, { name })
-    return data.domains[0] ?? null
+    return filterDisplayable(data.domains)[0] ?? null
   })
