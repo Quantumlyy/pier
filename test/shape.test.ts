@@ -24,8 +24,8 @@ describe('toMarketplaceDomain', () => {
   test('maps a fully-populated ENSNode domain', () => {
     const result = toMarketplaceDomain(baseDomain())
     expect(result).toEqual({
-      name: 'vitalik',
-      name_ens: 'vitalik.eth',
+      name: 'vitalik.eth',
+      name_ens: 'vitalik',
       expire_time: 2468928330,
       owner: '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
       terms: [],
@@ -53,23 +53,23 @@ describe('toMarketplaceDomain', () => {
     expect(result.owner).toBeNull()
   })
 
-  test('derives name from name when labelName is missing', () => {
+  test('derives the label from the full name when labelName is missing', () => {
     const result = toMarketplaceDomain(baseDomain({ labelName: null }))
-    expect(result.name).toBe('vitalik')
-    expect(result.name_ens).toBe('vitalik.eth')
+    expect(result.name).toBe('vitalik.eth')
+    expect(result.name_ens).toBe('vitalik')
   })
 
-  test('derives name as last label for multi-label name', () => {
+  test('derives the label as the last segment before .eth for multi-label names', () => {
     const result = toMarketplaceDomain(
       baseDomain({ labelName: null, name: 'sub.vitalik.eth' }),
     )
-    expect(result.name).toBe('vitalik')
-    expect(result.name_ens).toBe('sub.vitalik.eth')
+    expect(result.name).toBe('sub.vitalik.eth')
+    expect(result.name_ens).toBe('vitalik')
   })
 
   test('empty labelName falls back to derivation', () => {
     const result = toMarketplaceDomain(baseDomain({ labelName: '' }))
-    expect(result.name).toBe('vitalik')
+    expect(result.name_ens).toBe('vitalik')
   })
 
   test('falls back to registration.expiryDate when expiryDate missing', () => {

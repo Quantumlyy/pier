@@ -22,8 +22,14 @@ const pickExpiry = (d: ENSNodeDomain): number | null =>
   parseUnixSeconds(d.expiryDate) ?? parseUnixSeconds(d.registration?.expiryDate ?? null)
 
 export const toMarketplaceDomain = (d: ENSNodeDomain): MarketplaceDomainType => ({
-  name: d.labelName && d.labelName.length > 0 ? d.labelName : labelFromName(d.name),
-  name_ens: d.name ?? '',
+  // Frontend convention (NOT what the field names suggest):
+  // - `name` is the full ENS string (e.g. "vitalik.eth"); used for display.
+  // - `name_ens` is the label (e.g. "vitalik"); fed to getDomainHexId(label)
+  //   = keccak256(label) to compute the BaseRegistrar tokenId for like /
+  //   cart / offer / extend operations. Inverting these silently produces
+  //   wrong token IDs and broken mutations.
+  name: d.name ?? '',
+  name_ens: d.labelName && d.labelName.length > 0 ? d.labelName : labelFromName(d.name),
   expire_time: pickExpiry(d),
   owner: d.owner?.id ? d.owner.id.toLowerCase() : null,
   terms: [],

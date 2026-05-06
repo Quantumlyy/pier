@@ -218,7 +218,8 @@ describe('GET /search/plain', () => {
     )
     expect(r.status).toBe(200)
     expect(r.body.domains).toHaveLength(1)
-    expect(r.body.domains[0]?.name_ens).toBe('vital.eth')
+    expect(r.body.domains[0]?.name).toBe('vital.eth')
+    expect(r.body.domains[0]?.name_ens).toBe('vital')
     expect(calls[0]?.body?.variables.prefix).toBe('vital')
   })
 
@@ -249,10 +250,10 @@ describe('GET /roll', () => {
         ],
       }),
     )
-    const r = await json<{ domains: { name_ens: string }[] }>(req.get('/roll?limit=2'))
+    const r = await json<{ domains: { name: string }[] }>(req.get('/roll?limit=2'))
     expect(r.status).toBe(200)
     expect(r.body.domains.length).toBeLessThanOrEqual(2)
-    for (const d of r.body.domains) expect(d.name_ens).toMatch(/\.eth$/)
+    for (const d of r.body.domains) expect(d.name).toMatch(/\.eth$/)
   })
 })
 
