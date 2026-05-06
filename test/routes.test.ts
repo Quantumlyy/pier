@@ -338,6 +338,34 @@ describe('GET /search/plain', () => {
     expect(r.body.domains.find((d) => d.name === 'vital.eth')).toBeUndefined()
   })
 
+  test('keeps walking when a full upstream page is mostly filtered out', async () => {
+    // Upstream returns a full 200-row page but almost every row is a
+    // bracketed (non-displayable) label, so the post-filter yields just a
+    // couple of rows. The walker must use the raw upstream count for
+    // end-of-stream detection — otherwise it stops here and never fetches
+    // page 2 where another real match lives.
+    let n = 0
+    installFetch(({ body }) => {
+      if (body?.variables.prefix === undefined) return gqlOk({ domains: [] })
+      n++
+      if (n === 1) {
+        const domains = Array.from({ length: 200 }, (_, i) => {
+          // Two real matches at positions 0 and 1; everything else bracketed.
+          if (i === 0) return ensDomain('vital-aaa.eth', { labelName: 'vital-aaa' })
+          if (i === 1) return ensDomain('vital-bbb.eth', { labelName: 'vital-bbb' })
+          return ensDomain(`[h${i}].eth`, { labelName: `[h${i}]` })
+        })
+        return gqlOk({ domains })
+      }
+      return gqlOk({ domains: [ensDomain('vital-zzz.eth', { labelName: 'vital-zzz' })] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=10&offset=0'),
+    )
+    expect(n).toBeGreaterThanOrEqual(2)
+    expect(r.body.domains.map((d) => d.name)).toContain('vital-zzz.eth')
+  })
+
   test('does not skip or duplicate items across pages', async () => {
     // Walker pulls one upstream page of 10 names; composePage prepends exact
     // and slices for each request. We assert offsets line up with no gaps.

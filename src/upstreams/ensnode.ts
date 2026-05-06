@@ -3,6 +3,16 @@ import { ensCache } from '../lib/cache.ts'
 import { effectiveOwner } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 
+// Returned by the page-style helpers used by the search walker.
+// `raw` is the unfiltered upstream length; the walker uses it to decide
+// whether ENSNode has more results, since `domains` has already been
+// filtered for displayability and a single bracketed label in a full page
+// would otherwise look like end-of-stream.
+export type EnsPage = {
+  domains: ENSNodeDomain[]
+  raw: number
+}
+
 // namehash('eth') — every BaseRegistrar second-level name has this as its
 // parent. Filtering by parentId at the query level eliminates .base.eth /
 // .linea.eth / subdomains in one shot; ENSNode confirms support via the
@@ -92,7 +102,7 @@ query SearchByPrefix($prefix: String!, $parentId: String!, $first: Int!, $skip: 
   ) { ...DomainFields }
 }`
 
-export const searchByPrefix = (prefix: string, first: number, skip: number) =>
+export const searchByPrefix = (prefix: string, first: number, skip: number): Promise<EnsPage> =>
   cached('searchByPrefix', { prefix, first, skip }, async () => {
     const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_PREFIX, {
       prefix,
@@ -100,8 +110,8 @@ export const searchByPrefix = (prefix: string, first: number, skip: number) =>
       first,
       skip,
     })
-    return filterDisplayable(data.domains)
-  })
+    return { domains: filterDisplayable(data.domains), raw: data.domains.length }
+  }) as Promise<EnsPage>
 
 // Default-browse query: no name filter, ordered by createdAt desc so the
 // frontend's "open the marketplace with no search term" view renders recent
@@ -117,15 +127,15 @@ query BrowseRecent($parentId: String!, $first: Int!, $skip: Int!) {
   ) { ...DomainFields }
 }`
 
-export const browseRecent = (first: number, skip: number) =>
+export const browseRecent = (first: number, skip: number): Promise<EnsPage> =>
   cached('browseRecent', { first, skip }, async () => {
     const data = await gql<{ domains: ENSNodeDomain[] }>(BROWSE_RECENT, {
       parentId: ETH_NODE,
       first,
       skip,
     })
-    return filterDisplayable(data.domains)
-  })
+    return { domains: filterDisplayable(data.domains), raw: data.domains.length }
+  }) as Promise<EnsPage>
 
 const SEARCH_BY_CONTAINS = `${DOMAIN_FRAGMENT}
 query SearchByContains($needle: String!, $parentId: String!, $first: Int!, $skip: Int!) {
@@ -138,7 +148,7 @@ query SearchByContains($needle: String!, $parentId: String!, $first: Int!, $skip
   ) { ...DomainFields }
 }`
 
-export const searchByContains = (needle: string, first: number, skip: number) =>
+export const searchByContains = (needle: string, first: number, skip: number): Promise<EnsPage> =>
   cached('searchByContains', { needle, first, skip }, async () => {
     const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_CONTAINS, {
       needle,
@@ -146,8 +156,8 @@ export const searchByContains = (needle: string, first: number, skip: number) =>
       first,
       skip,
     })
-    return filterDisplayable(data.domains)
-  })
+    return { domains: filterDisplayable(data.domains), raw: data.domains.length }
+  }) as Promise<EnsPage>
 
 // A user's portfolio can hold a .eth 2LD via three different ENSNode fields:
 //   - wrappedOwnerId : wrapped names (registry owner is the NameWrapper)

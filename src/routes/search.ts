@@ -5,6 +5,7 @@ import { toMarketplaceDomain } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 import {
   browseRecent,
+  type EnsPage,
   getDomainByName,
   getExpiryDates,
   searchByContains,
@@ -114,18 +115,23 @@ const WALK_MAX = 5000
 // Walk the upstream `fetchPage(skip)` until we've collected at least
 // `target` items that pass `filters`, ENSNode is exhausted, or we hit the
 // safety cap. Returns the collected (filtered) items in upstream order.
+//
+// End-of-stream is decided by the *raw* upstream count, not the count of
+// displayable domains: searchByPrefix and friends pre-filter bracketed
+// labels, so a single hidden domain in a full page would otherwise look
+// like end-of-stream and stop the walker prematurely.
 const walkAndFilter = async (
-  fetchPage: (skip: number) => Promise<ENSNodeDomain[]>,
+  fetchPage: (skip: number) => Promise<EnsPage>,
   filters: SearchFilters,
   target: number,
 ): Promise<ENSNodeDomain[]> => {
   const out: ENSNodeDomain[] = []
   let skip = 0
   while (out.length < target && skip < WALK_MAX) {
-    const batch = await fetchPage(skip)
-    if (batch.length === 0) break
-    out.push(...applyFilters(batch, filters))
-    if (batch.length < WALK_PAGE) break
+    const page = await fetchPage(skip)
+    if (page.raw === 0) break
+    out.push(...applyFilters(page.domains, filters))
+    if (page.raw < WALK_PAGE) break
     skip += WALK_PAGE
   }
   return out

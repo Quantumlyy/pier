@@ -58,15 +58,31 @@ const domain = (name: string, overrides: { owner?: string; labelName?: string } 
 }
 
 describe('searchByPrefix', () => {
-  test('hits ENSNode with the prefix variable and returns domains', async () => {
+  test('hits ENSNode with the prefix variable and returns a page', async () => {
     const { calls } = installFetch(() => ok({ domains: [domain('vital.eth')] }))
-    const result = await searchByPrefix('vital', 5, 10)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.name).toBe('vital.eth')
+    const page = await searchByPrefix('vital', 5, 10)
+    expect(page.domains).toHaveLength(1)
+    expect(page.domains[0]?.name).toBe('vital.eth')
+    expect(page.raw).toBe(1)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.body.variables).toMatchObject({ prefix: 'vital', first: 5, skip: 10 })
     expect(calls[0]?.body.variables.parentId).toMatch(/^0x[0-9a-f]{64}$/)
     expect(calls[0]?.url).toContain('ensnode')
+  })
+
+  test('reports raw upstream count separately from filtered domains', async () => {
+    installFetch(() =>
+      ok({
+        domains: [
+          domain('vitalik.eth'),
+          domain('[abc].eth', { labelName: '[abc]' }),
+        ],
+      }),
+    )
+    const page = await searchByPrefix('vital', 5, 0)
+    // raw = 2 (one bracketed dropped), domains = 1.
+    expect(page.raw).toBe(2)
+    expect(page.domains.map((d) => d.name)).toEqual(['vitalik.eth'])
   })
 
   test('caches by (prefix, first, skip)', async () => {
@@ -273,8 +289,9 @@ describe('browseRecent', () => {
   test('uses no name filter and orders by createdAt desc', async () => {
     const { browseRecent } = await import('../src/upstreams/ensnode.ts')
     const { calls } = installFetch(() => ok({ domains: [domain('recent.eth')] }))
-    const result = await browseRecent(10, 0)
-    expect(result).toHaveLength(1)
+    const page = await browseRecent(10, 0)
+    expect(page.domains).toHaveLength(1)
+    expect(page.raw).toBe(1)
     const query = calls[0]?.body?.query ?? ''
     expect(query).toContain('orderBy: createdAt')
     expect(query).toContain('orderDirection: desc')
@@ -305,8 +322,11 @@ describe('eth-parent + displayability filter', () => {
         ],
       }),
     )
-    const result = await searchByPrefix('v', 10, 0)
-    expect(result.map((d) => d.name)).toEqual(['vitalik.eth'])
+    const page = await searchByPrefix('v', 10, 0)
+    expect(page.domains.map((d) => d.name)).toEqual(['vitalik.eth'])
+    // Raw count still reports the full upstream, including the bracketed/multi-label
+    // entries — the walker uses this to know upstream isn't exhausted.
+    expect(page.raw).toBe(4)
   })
 })
 
@@ -317,9 +337,9 @@ describe('gql error handling', () => {
       n++
       return n === 1 ? err(503, 'upstream down') : ok({ domains: [domain('a.eth')] })
     })
-    const result = await searchByPrefix('a', 5, 0)
+    const page = await searchByPrefix('a', 5, 0)
     expect(calls).toHaveLength(2)
-    expect(result[0]?.name).toBe('a.eth')
+    expect(page.domains[0]?.name).toBe('a.eth')
   })
 
   test('does not retry on 4xx', async () => {
