@@ -29,6 +29,7 @@ fragment DomainFields on Domain {
   name
   labelName
   owner { id }
+  wrappedOwner { id }
   registrant { id }
   expiryDate
   createdAt
@@ -123,10 +124,17 @@ export const searchByContains = (needle: string, first: number, skip: number) =>
     return filterDisplayable(data.domains)
   })
 
+// Wrapped names land in the registry under the NameWrapper contract, with the
+// effective owner held in `wrappedOwner`. A naive `ownerId == addr` filter
+// drops every wrapped name the user holds, so we OR-compose against
+// wrappedOwnerId too. ENSNode's Domain_filter supports `or:`.
 const GET_DOMAINS_BY_OWNER = `${DOMAIN_FRAGMENT}
 query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
-    where: { ownerId: $owner, parentId: $parentId }
+    where: {
+      parentId: $parentId,
+      or: [{ ownerId: $owner }, { wrappedOwnerId: $owner }]
+    }
     orderBy: name
     orderDirection: asc
     first: $first

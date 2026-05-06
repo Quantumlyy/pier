@@ -42,16 +42,20 @@ afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-const domain = (name: string, owner = '0xabc') => ({
-  id: '0x' + name,
-  name,
-  labelName: name.replace('.eth', ''),
-  owner: { id: owner },
-  registrant: { id: owner },
-  expiryDate: '1700000000',
-  createdAt: '1500000000',
-  registration: { registrationDate: '1500000000', expiryDate: '1700000000' },
-})
+const domain = (name: string, overrides: { owner?: string; labelName?: string } = {}) => {
+  const owner = overrides.owner ?? '0xabc'
+  return {
+    id: '0x' + name,
+    name,
+    labelName: overrides.labelName ?? name.replace('.eth', ''),
+    owner: { id: owner },
+    wrappedOwner: null,
+    registrant: { id: owner },
+    expiryDate: '1700000000',
+    createdAt: '1500000000',
+    registration: { registrationDate: '1500000000', expiryDate: '1700000000' },
+  }
+}
 
 describe('searchByPrefix', () => {
   test('hits ENSNode with the prefix variable and returns domains', async () => {
@@ -94,6 +98,39 @@ describe('getDomainsByOwner', () => {
     const { calls } = installFetch(() => ok({ domains: [] }))
     await getDomainsByOwner('0xABCDEF1234567890ABCDEF1234567890ABCDEF12', 10, 0)
     expect(calls[0]?.body.variables.owner).toBe('0xabcdef1234567890abcdef1234567890abcdef12')
+  })
+
+  test('OR-composes ownerId and wrappedOwnerId in the GraphQL query', async () => {
+    const { calls } = installFetch(() => ok({ domains: [] }))
+    await getDomainsByOwner('0xabc', 10, 0)
+    const query = calls[0]?.body.query ?? ''
+    expect(query).toContain('ownerId: $owner')
+    expect(query).toContain('wrappedOwnerId: $owner')
+    expect(query).toContain('or:')
+  })
+
+  test('returns wrapped names with the user as effective owner via shape', async () => {
+    // ENSNode emits owner = NameWrapper, wrappedOwner = the user
+    installFetch(() =>
+      ok({
+        domains: [
+          {
+            id: '0xfoo',
+            name: 'wrapped.eth',
+            labelName: 'wrapped',
+            owner: { id: '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401' },
+            wrappedOwner: { id: '0xabcabcabcabcabcabcabcabcabcabcabcabcabca' },
+            registrant: { id: '0xabcabcabcabcabcabcabcabcabcabcabcabcabca' },
+            expiryDate: '1900000000',
+            createdAt: '1500000000',
+            registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+          },
+        ],
+      }),
+    )
+    const result = await getDomainsByOwner('0xabcabcabcabcabcabcabcabcabcabcabcabcabca', 10, 0)
+    expect(result).toHaveLength(1)
+    expect(result[0]?.wrappedOwner?.id).toBe('0xabcabcabcabcabcabcabcabcabcabcabcabcabca')
   })
 })
 
@@ -144,7 +181,7 @@ describe('eth-parent + displayability filter', () => {
           domain('vitalik.eth'),
           domain('[abc123].eth', { labelName: '[abc123]' }),
           domain('sub.vitalik.eth', { labelName: 'sub' }),
-          { ...domain('weird'), name: 'weird' }, // missing .eth
+          { ...domain('weird.eth'), name: 'weird' }, // missing .eth
         ],
       }),
     )

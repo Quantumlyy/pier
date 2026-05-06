@@ -21,6 +21,16 @@ const parseUnixSeconds = (raw: string | null | undefined): number | null => {
 const pickExpiry = (d: ENSNodeDomain): number | null =>
   parseUnixSeconds(d.expiryDate) ?? parseUnixSeconds(d.registration?.expiryDate ?? null)
 
+// For wrapped names ENSNode reports `owner` as the NameWrapper contract and
+// `wrappedOwner` as the user's address; for unwrapped names `wrappedOwner` is
+// null. Always prefer the latter when present.
+const effectiveOwner = (d: ENSNodeDomain): string | null => {
+  const wrapped = d.wrappedOwner?.id
+  if (wrapped) return wrapped.toLowerCase()
+  const owner = d.owner?.id
+  return owner ? owner.toLowerCase() : null
+}
+
 export const toMarketplaceDomain = (d: ENSNodeDomain): MarketplaceDomainType => ({
   // Frontend convention (NOT what the field names suggest):
   // - `name` is the full ENS string (e.g. "vitalik.eth"); used for display.
@@ -31,7 +41,7 @@ export const toMarketplaceDomain = (d: ENSNodeDomain): MarketplaceDomainType => 
   name: d.name ?? '',
   name_ens: d.labelName && d.labelName.length > 0 ? d.labelName : labelFromName(d.name),
   expire_time: pickExpiry(d),
-  owner: d.owner?.id ? d.owner.id.toLowerCase() : null,
+  owner: effectiveOwner(d),
   terms: [],
   taxonomies: [],
   last_price: null,

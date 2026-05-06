@@ -50,6 +50,7 @@ export type ENSNodeDomain = {
   name: string | null
   labelName: string | null
   owner: { id: string } | null
+  wrappedOwner?: { id: string } | null
   registrant: { id: string } | null
   expiryDate: string | null
   createdAt: string | null

@@ -53,6 +53,27 @@ describe('toMarketplaceDomain', () => {
     expect(result.owner).toBeNull()
   })
 
+  test('prefers wrappedOwner over registry owner for wrapped names', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({
+        owner: { id: '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401' }, // NameWrapper
+        wrappedOwner: { id: '0x35396D0DBfFD9D4Eb1aFE1eA7c7DC76dA2F8e5E1' },
+      }),
+    )
+    expect(result.owner).toBe('0x35396d0dbffd9d4eb1afe1ea7c7dc76da2f8e5e1')
+  })
+
+  test('falls back to registry owner when wrappedOwner is null/missing', () => {
+    expect(
+      toMarketplaceDomain(baseDomain({ wrappedOwner: null })).owner,
+    ).toBe('0xd8da6bf26964af9d7eed9e03e53415d37aa96045')
+    const noWrapField = baseDomain()
+    delete (noWrapField as Partial<typeof noWrapField>).wrappedOwner
+    expect(toMarketplaceDomain(noWrapField).owner).toBe(
+      '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+    )
+  })
+
   test('derives the label from the full name when labelName is missing', () => {
     const result = toMarketplaceDomain(baseDomain({ labelName: null }))
     expect(result.name).toBe('vitalik.eth')
