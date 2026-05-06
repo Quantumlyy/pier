@@ -26,7 +26,7 @@ describe('toMarketplaceDomain', () => {
     expect(result).toEqual({
       name: 'vitalik.eth',
       name_ens: 'vitalik',
-      expire_time: 2468928330,
+      expire_time: 2461152330,
       owner: '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
       terms: [],
       taxonomies: [],
@@ -93,26 +93,40 @@ describe('toMarketplaceDomain', () => {
     expect(result.name_ens).toBe('vitalik')
   })
 
-  test('falls back to registration.expiryDate when expiryDate missing', () => {
-    const result = toMarketplaceDomain(baseDomain({ expiryDate: null }))
+  test('prefers registration.expiryDate (registrar) over Domain.expiryDate (grace-included)', () => {
+    // Sample values borrow from a real ENSNode response for vitalik.eth:
+    // Domain.expiryDate = registration.expiryDate + 90 days.
+    const result = toMarketplaceDomain(baseDomain())
     expect(result.expire_time).toBe(2461152330)
   })
 
-  test('returns null expiry when both sources missing', () => {
+  test('falls back to Domain.expiryDate when registration is missing', () => {
+    const result = toMarketplaceDomain(baseDomain({ registration: null }))
+    expect(result.expire_time).toBe(2468928330)
+  })
+
+  test('returns null expiry when both sources are missing', () => {
     const result = toMarketplaceDomain(
       baseDomain({ expiryDate: null, registration: null }),
     )
     expect(result.expire_time).toBeNull()
   })
 
-  test('coerces numeric-string expiryDate', () => {
-    const result = toMarketplaceDomain(baseDomain({ expiryDate: '1700000000' }))
+  test('coerces numeric-string registration expiry', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({ registration: { registrationDate: '0', expiryDate: '1700000000' } }),
+    )
     expect(result.expire_time).toBe(1700000000)
   })
 
-  test('non-numeric expiryDate yields null', () => {
-    const result = toMarketplaceDomain(baseDomain({ expiryDate: 'not-a-number' }))
-    expect(result.expire_time).toBe(2461152330) // falls through to registration
+  test('non-numeric expiry sources yield null', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({
+        expiryDate: 'not-a-number',
+        registration: { registrationDate: '0', expiryDate: 'also-bad' },
+      }),
+    )
+    expect(result.expire_time).toBeNull()
   })
 
   test('handles fully missing name', () => {
@@ -148,10 +162,10 @@ describe('toMarketplaceDomain', () => {
 })
 
 describe('toExpiresEntry', () => {
-  test('uses domain expiry when present', () => {
+  test('uses the registrar expiry when present', () => {
     expect(toExpiresEntry('vitalik.eth', baseDomain())).toEqual({
       domain: 'vitalik.eth',
-      expires: 2468928330,
+      expires: 2461152330,
     })
   })
 

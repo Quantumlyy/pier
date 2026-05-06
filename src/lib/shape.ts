@@ -18,8 +18,12 @@ const parseUnixSeconds = (raw: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
+// Prefer Registration.expiryDate (the actual BaseRegistrar expiry). For .eth
+// 2LDs Domain.expiryDate is shifted forward 90 days because it includes the
+// grace period — using it would make the UI show expiry dates that are 90
+// days late and mislabel grace-period names as still active.
 const pickExpiry = (d: ENSNodeDomain): number | null =>
-  parseUnixSeconds(d.expiryDate) ?? parseUnixSeconds(d.registration?.expiryDate ?? null)
+  parseUnixSeconds(d.registration?.expiryDate ?? null) ?? parseUnixSeconds(d.expiryDate)
 
 // For wrapped names ENSNode reports `owner` as the NameWrapper contract and
 // `wrappedOwner` as the user's address; for unwrapped names `wrappedOwner` is

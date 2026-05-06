@@ -258,12 +258,21 @@ describe('GET /roll', () => {
 })
 
 describe('GET /info/domain/expires', () => {
-  test('returns real expires for ENS names', async () => {
-    installFetch(() => gqlOk({ domains: [ensDomain('vitalik.eth', { expiryDate: '2468928330' })] }))
+  test('returns the registrar expiry for ENS names', async () => {
+    installFetch(() =>
+      gqlOk({
+        domains: [
+          ensDomain('vitalik.eth', {
+            expiryDate: '2468928330',
+            registration: { registrationDate: '1581013420', expiryDate: '2461152330' },
+          }),
+        ],
+      }),
+    )
     const r = await json<{ domains: { domain: string; expires: number }[] }>(
       req.get('/info/domain/expires?domains=vitalik.eth'),
     )
-    expect(r.body.domains).toEqual([{ domain: 'vitalik.eth', expires: 2468928330 }])
+    expect(r.body.domains).toEqual([{ domain: 'vitalik.eth', expires: 2461152330 }])
   })
 
   test('returns expires:0 for hex tokenIds', async () => {
