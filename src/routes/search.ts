@@ -101,31 +101,54 @@ const applyFilters = (domains: ENSNodeDomain[], f: SearchFilters): ENSNodeDomain
   return domains.filter((d) => passesFilters(d, f))
 }
 
-// When filters are active we over-fetch and slice locally so a single page
-// of restrictive results (e.g. 3-character labels) doesn't come back empty.
-// Capped to keep ENSNode happy.
-const upstreamLimit = (limit: number, f: SearchFilters): number =>
-  filtersActive(f) ? Math.min(Math.max(limit * 10, 100), 1000) : limit
 
-// `name_starts_with` ordered alphabetically puts every "${name}-..." domain
-// (hyphen 0x2D < period 0x2E) before "${name}.eth", so the exact registered
-// name routinely falls off the first page. The frontend reads its absence as
-// "unregistered" and offers to register a name someone already owns.
-//
-// On every page, drop the exact match from the prefix results. On page 0
-// only, prepend it. That gives the exact match a deterministic position 0
-// without losing or duplicating the alphabetical-tail item across pages —
-// page 0 may exceed `limit` by one (frontend handles variable page sizes
-// via pageParam + 1), and the caller is free to slice if needed.
-const withExactPrepended = async (
-  fetcher: () => Promise<ENSNodeDomain[]>,
-  fullName: string,
+// ENSNode page size for the internal walker. Big enough that a typical
+// limit/offset request fits in one round-trip; small enough that filtered
+// searches don't pull thousands of rows when the user only asks for 20.
+const WALK_PAGE = 200
+// Hard cap on how far we walk for a single filter-active request. With
+// extreme filters (e.g. min=max=3), some matches sit deep in alphabetical
+// order — but pier isn't a search engine. Cap and accept short pages.
+const WALK_MAX = 5000
+
+// Walk the upstream `fetchPage(skip)` until we've collected at least
+// `target` items that pass `filters`, ENSNode is exhausted, or we hit the
+// safety cap. Returns the collected (filtered) items in upstream order.
+const walkAndFilter = async (
+  fetchPage: (skip: number) => Promise<ENSNodeDomain[]>,
+  filters: SearchFilters,
+  target: number,
+): Promise<ENSNodeDomain[]> => {
+  const out: ENSNodeDomain[] = []
+  let skip = 0
+  while (out.length < target && skip < WALK_MAX) {
+    const batch = await fetchPage(skip)
+    if (batch.length === 0) break
+    out.push(...applyFilters(batch, filters))
+    if (batch.length < WALK_PAGE) break
+    skip += WALK_PAGE
+  }
+  return out
+}
+
+// Compose a final result page from the walked-and-filtered list, adding
+// the exact match at logical position 0 when applicable. Stays
+// stateless: every call recomputes the right slice for the requested
+// (offset, limit), so paging through the filtered space never repeats or
+// skips items the way slicing the raw upstream did.
+const composePage = async (
+  walked: ENSNodeDomain[],
+  fullName: string | null,
+  filters: SearchFilters,
+  limit: number,
   offset: number,
 ): Promise<ENSNodeDomain[]> => {
-  const [exact, page] = await Promise.all([getDomainByName(fullName), fetcher()])
-  if (!exact) return page
-  const filtered = page.filter((d) => d.name !== fullName)
-  return offset === 0 ? [exact, ...filtered] : filtered
+  if (!fullName) return walked.slice(offset, offset + limit)
+  const exact = await getDomainByName(fullName)
+  const withoutExact = walked.filter((d) => d.name !== fullName)
+  const exactPasses = exact && passesFilters(exact, filters)
+  const visible = exactPasses ? [exact, ...withoutExact] : withoutExact
+  return visible.slice(offset, offset + limit)
 }
 
 export const searchRoutes = new Elysia({ tags: ['search'] })
@@ -135,19 +158,14 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       const name = normalizeName(query.name)
       const { limit, offset } = parsePagination(query.limit, query.offset)
       const filters = parseFilters(query)
-      const fetchLimit = upstreamLimit(limit, filters)
-      const raw = name
-        ? await withExactPrepended(
-            () => searchByPrefix(name, fetchLimit, offset),
-            `${name}.eth`,
-            offset,
-          )
-        : await browseRecent(fetchLimit, offset)
-      // Only slice when filters consumed excess from over-fetch; for the
-      // unfiltered path, let page 0 exceed `limit` by one when the exact
-      // match is prepended (frontend handles variable page sizes).
-      const filtered = applyFilters(raw, filters)
-      const domains = filtersActive(filters) ? filtered.slice(0, limit) : filtered
+      const fetcher = name
+        ? (skip: number) => searchByPrefix(name, WALK_PAGE, skip)
+        : (skip: number) => browseRecent(WALK_PAGE, skip)
+      // +1 reserves a slot for the exact match we may prepend at logical
+      // position 0; composePage trims it back to `limit`.
+      const target = offset + limit + (name ? 1 : 0)
+      const walked = await walkAndFilter(fetcher, filters, target)
+      const domains = await composePage(walked, name ? `${name}.eth` : null, filters, limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
@@ -166,19 +184,12 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       const name = normalizeName(query.name)
       const { limit, offset } = parsePagination(query.limit, query.offset)
       const filters = parseFilters(query)
-      const fetchLimit = upstreamLimit(limit, filters)
-      const raw = name
-        ? await withExactPrepended(
-            () => searchByContains(name, fetchLimit, offset),
-            `${name}.eth`,
-            offset,
-          )
-        : await browseRecent(fetchLimit, offset)
-      // Only slice when filters consumed excess from over-fetch; for the
-      // unfiltered path, let page 0 exceed `limit` by one when the exact
-      // match is prepended (frontend handles variable page sizes).
-      const filtered = applyFilters(raw, filters)
-      const domains = filtersActive(filters) ? filtered.slice(0, limit) : filtered
+      const fetcher = name
+        ? (skip: number) => searchByContains(name, WALK_PAGE, skip)
+        : (skip: number) => browseRecent(WALK_PAGE, skip)
+      const target = offset + limit + (name ? 1 : 0)
+      const walked = await walkAndFilter(fetcher, filters, target)
+      const domains = await composePage(walked, name ? `${name}.eth` : null, filters, limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {

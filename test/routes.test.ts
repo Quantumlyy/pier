@@ -234,7 +234,7 @@ describe('GET /search/plain', () => {
     expect(prefixCall?.body?.variables.prefix).toBe('vitalik')
   })
 
-  test('prepends the exact match on the first page (no trimming)', async () => {
+  test('prepends the exact match on the first page (exactly `limit` items)', async () => {
     let n = 0
     installFetch(({ body }) => {
       n++
@@ -248,13 +248,9 @@ describe('GET /search/plain', () => {
     const r = await json<{ domains: { name: string }[] }>(
       req.get('/search/plain?name=vital&limit=2&offset=0'),
     )
-    // Page 0 may exceed limit by one — by design, so the alphabetical-tail
-    // item isn't dropped between pages. Frontend handles variable page sizes.
-    expect(r.body.domains.map((d) => d.name)).toEqual([
-      'vital.eth',
-      'vital-foo.eth',
-      'vital-bar.eth',
-    ])
+    // Walker collects 3 items (limit + 1 for exact slot), composePage prepends
+    // exact and slices to limit. vital-bar.eth lands on the next page.
+    expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
     expect(n).toBe(2)
   })
 
@@ -315,8 +311,9 @@ describe('GET /search/plain', () => {
   })
 
   test('filters the exact match out of later pages and never duplicates it', async () => {
-    // Page at offset=5 happens to contain vital.eth alphabetically — pier
-    // must drop it because it was already shown prepended on page 0.
+    // Walker pulls a 200-item upstream page; vital.eth happens to land in it
+    // alphabetically. composePage drops it from the without-exact list and
+    // composes [exact, ...others]; offset=5 just slices that composed list.
     installFetch(({ body }) => {
       if (body?.variables.prefix !== undefined) {
         return gqlOk({
@@ -334,35 +331,25 @@ describe('GET /search/plain', () => {
     const r = await json<{ domains: { name: string }[] }>(
       req.get('/search/plain?name=vital&limit=5&offset=5'),
     )
-    expect(r.body.domains.map((d) => d.name)).toEqual([
-      'vital-f.eth',
-      'vital-g.eth',
-      'vital2.eth',
-      'vitality.eth',
-    ])
+    // 5 prefix items + 1 exact = composed list of 5 (after dedupe) + exact at 0:
+    //   [exact, v-f, v-g, vital2, vitality]
+    // slice(5, 10) → empty (we've shown them all on prior pages).
+    expect(r.body.domains).toEqual([])
     expect(r.body.domains.find((d) => d.name === 'vital.eth')).toBeUndefined()
   })
 
-  test('does not skip the alphabetical-tail item between pages 0 and 1', async () => {
-    // Page 0: prefix returns 5 hyphenated names; exact prepended → 6 items.
-    // Page 1: prefix returns the next batch starting with v-e (the item that
-    // would have been dropped by a trim-to-limit on page 0).
+  test('does not skip or duplicate items across pages', async () => {
+    // Walker pulls one upstream page of 10 names; composePage prepends exact
+    // and slices for each request. We assert offsets line up with no gaps.
     installFetch(({ body }) => {
       if (body?.variables.prefix !== undefined) {
-        const skip = Number(body.variables.skip ?? 0)
-        if (skip === 0) {
-          return gqlOk({
-            domains: [
-              ensDomain('vital-a.eth'),
-              ensDomain('vital-b.eth'),
-              ensDomain('vital-c.eth'),
-              ensDomain('vital-d.eth'),
-              ensDomain('vital-e.eth'),
-            ],
-          })
-        }
         return gqlOk({
           domains: [
+            ensDomain('vital-a.eth'),
+            ensDomain('vital-b.eth'),
+            ensDomain('vital-c.eth'),
+            ensDomain('vital-d.eth'),
+            ensDomain('vital-e.eth'),
             ensDomain('vital-f.eth'),
             ensDomain('vital-g.eth'),
             ensDomain('vital-h.eth'),
@@ -385,15 +372,16 @@ describe('GET /search/plain', () => {
       'vital-b.eth',
       'vital-c.eth',
       'vital-d.eth',
-      'vital-e.eth',
     ])
     expect(p1.body.domains.map((d) => d.name)).toEqual([
+      'vital-e.eth',
       'vital-f.eth',
       'vital-g.eth',
       'vital-h.eth',
       'vital-i.eth',
-      'vital-j.eth',
     ])
+    const all = [...p0.body.domains, ...p1.body.domains].map((d) => d.name)
+    expect(new Set(all).size).toBe(all.length) // no duplicates
   })
 })
 
