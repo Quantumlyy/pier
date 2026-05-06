@@ -137,10 +137,14 @@ export const browseRecent = (first: number, skip: number): Promise<EnsPage> =>
     return { domains: filterDisplayable(data.domains), raw: data.domains.length }
   }) as Promise<EnsPage>
 
+// Match on the label (the part before .eth), not the full name — otherwise
+// `name=eth` would match every BaseRegistrar 2LD because they all end in
+// ".eth". labelName_contains also keeps results limited to the label space
+// the frontend actually operates in.
 const SEARCH_BY_CONTAINS = `${DOMAIN_FRAGMENT}
 query SearchByContains($needle: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
-    where: { name_contains: $needle, parentId: $parentId }
+    where: { labelName_contains: $needle, parentId: $parentId }
     orderBy: name
     orderDirection: asc
     first: $first
@@ -186,16 +190,22 @@ query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip
 // enough that most portfolios fit in one round-trip; manager-only matches
 // and bracketed labels filter out before any (skip, first) slicing happens.
 const OWNER_PAGE = 200
-// Hard cap on the number of domains we'll keep for a single owner — the
-// 5,000-name registration services exist but aren't pier's target user.
-const OWNER_MAX = 5_000
+// Hard cap on how many *raw* upstream rows we'll scan for one owner. The
+// guard has to be on the cursor (skip) rather than the collected length:
+// a wallet that's the registry manager for thousands of names but the NFT
+// holder for none produces filter-empty pages that never advance
+// `all.length`, so a length-based cap walks unbounded ENSNode pages.
+const OWNER_WALK_MAX = 10_000
+// Soft cap on retained domains — pier isn't targeting addresses that hold
+// >5k names and the response size needs a ceiling.
+const OWNER_KEEP_MAX = 5_000
 
 const fetchAllOwnerDomains = (owner: string) =>
   cached('fetchAllOwnerDomains', { owner }, async () => {
     const lc = owner.toLowerCase()
     const all: ENSNodeDomain[] = []
     let skip = 0
-    while (all.length < OWNER_MAX) {
+    while (skip < OWNER_WALK_MAX && all.length < OWNER_KEEP_MAX) {
       const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAINS_BY_OWNER, {
         owner: lc,
         parentId: ETH_NODE,
@@ -206,9 +216,9 @@ const fetchAllOwnerDomains = (owner: string) =>
         (d) => effectiveOwner(d) === lc,
       )
       all.push(...batch)
-      // The raw response length tells us when the upstream cursor is
-      // exhausted; the filtered length doesn't (a page can be all
-      // manager-only matches and look like end-of-stream when it isn't).
+      // Raw upstream length is the right exhaustion signal — a page can be
+      // entirely manager-only matches (filtered length 0) without meaning
+      // ENSNode has nothing more.
       if (data.domains.length < OWNER_PAGE) break
       skip += OWNER_PAGE
     }

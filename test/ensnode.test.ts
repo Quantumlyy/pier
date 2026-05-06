@@ -95,10 +95,15 @@ describe('searchByPrefix', () => {
 })
 
 describe('searchByContains', () => {
-  test('passes the needle variable', async () => {
+  test('passes the needle variable and matches on label, not full name', async () => {
     const { calls } = installFetch(() => ok({ domains: [] }))
     await searchByContains('itali', 3, 0)
     expect(calls[0]?.body.variables).toMatchObject({ needle: 'itali', first: 3, skip: 0 })
+    // Use labelName_contains so the user can't accidentally match the .eth
+    // suffix on every BaseRegistrar 2LD.
+    const query = calls[0]?.body.query ?? ''
+    expect(query).toContain('labelName_contains: $needle')
+    expect(query).not.toContain('name_contains: $needle')
   })
 
   test('cache key is independent from searchByPrefix', async () => {
@@ -114,6 +119,35 @@ describe('getDomainsByOwner', () => {
     const { calls } = installFetch(() => ok({ domains: [] }))
     await getDomainsByOwner('0xABCDEF1234567890ABCDEF1234567890ABCDEF12', 10, 0)
     expect(calls[0]?.body.variables.owner).toBe('0xabcdef1234567890abcdef1234567890abcdef12')
+  })
+
+  test('bounds the owner walk by skip, not collected length', async () => {
+    // Every page returns 200 raw domains, all manager-only (registrant !=
+    // queried wallet). The post-filter yields zero per page, so a
+    // length-capped loop would walk forever. The skip-based cap should
+    // stop after ~OWNER_WALK_MAX / OWNER_PAGE upstream calls (≤ 50).
+    const me = '0xa11ce0000000000000000000000000000000a11c'
+    const other = '0xb0b00000000000000000000000000000000000b0'
+    let calls = 0
+    installFetch(() => {
+      calls++
+      const domains = Array.from({ length: 200 }, (_, i) => ({
+        id: '0x' + i.toString(16).padStart(8, '0'),
+        name: `manager-${i}.eth`,
+        labelName: `manager-${i}`,
+        owner: { id: me },
+        wrappedOwner: null,
+        registrant: { id: other },
+        expiryDate: '1900000000',
+        createdAt: '1500000000',
+        registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+      }))
+      return ok({ domains })
+    })
+    const result = await getDomainsByOwner(me, 10, 0)
+    expect(result).toEqual([])
+    // OWNER_WALK_MAX = 10_000 / OWNER_PAGE = 200 → 50 upstream calls.
+    expect(calls).toBeLessThanOrEqual(50)
   })
 
   test('OR-composes ownerId, wrappedOwnerId, and registrantId in the query', async () => {
