@@ -22,37 +22,37 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
   const body = JSON.stringify({ query, variables })
   const headers = { 'content-type': 'application/json', accept: 'application/json' }
 
-  let lastErr: unknown = null
   for (let attempt = 0; attempt < 2; attempt++) {
+    let res: Response
     try {
-      const res = await fetch(env.ENSNODE_URL, { method: 'POST', headers, body })
-      if (res.status >= 500) {
-        lastErr = new Error(`ENSNode ${res.status}: ${(await res.text()).slice(0, 200)}`)
-        if (attempt === 0) {
-          await sleep(250)
-          continue
-        }
-        throw lastErr
-      }
-      if (!res.ok) {
-        throw new Error(`ENSNode ${res.status}: ${(await res.text()).slice(0, 200)}`)
-      }
-      const json = (await res.json()) as GraphQLResponse<T>
-      if (json.errors?.length) {
-        throw new Error(`ENSNode GraphQL: ${json.errors.map((e) => e.message).join('; ')}`)
-      }
-      if (!json.data) throw new Error('ENSNode: empty data')
-      return json.data
+      res = await fetch(env.ENSNODE_URL, { method: 'POST', headers, body })
     } catch (err) {
-      lastErr = err
       if (attempt === 0) {
         await sleep(250)
         continue
       }
       throw err
     }
+    if (res.status >= 500) {
+      const text = await res.text()
+      if (attempt === 0) {
+        await sleep(250)
+        continue
+      }
+      throw new Error(`ENSNode ${res.status}: ${text.slice(0, 200)}`)
+    }
+    if (!res.ok) {
+      // 4xx — caller bug, don't retry.
+      throw new Error(`ENSNode ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    }
+    const json = (await res.json()) as GraphQLResponse<T>
+    if (json.errors?.length) {
+      throw new Error(`ENSNode GraphQL: ${json.errors.map((e) => e.message).join('; ')}`)
+    }
+    if (!json.data) throw new Error('ENSNode: empty data')
+    return json.data
   }
-  throw lastErr instanceof Error ? lastErr : new Error('ENSNode: unknown error')
+  throw new Error('ENSNode: unreachable')
 }
 
 const cached = <T>(name: string, args: unknown, fn: () => Promise<T>): Promise<T> =>
