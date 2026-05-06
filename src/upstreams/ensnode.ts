@@ -172,22 +172,49 @@ query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip
   ) { ...DomainFields }
 }`
 
-export const getDomainsByOwner = (owner: string, first: number, skip: number) =>
-  cached('getDomainsByOwner', { owner, first, skip }, async () => {
+// ENSNode page size for the internal walk over an owner's domains. Big
+// enough that most portfolios fit in one round-trip; manager-only matches
+// and bracketed labels filter out before any (skip, first) slicing happens.
+const OWNER_PAGE = 200
+// Hard cap on the number of domains we'll keep for a single owner — the
+// 5,000-name registration services exist but aren't pier's target user.
+const OWNER_MAX = 5_000
+
+const fetchAllOwnerDomains = (owner: string) =>
+  cached('fetchAllOwnerDomains', { owner }, async () => {
     const lc = owner.toLowerCase()
-    const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAINS_BY_OWNER, {
-      owner: lc,
-      parentId: ETH_NODE,
-      first,
-      skip,
-    })
-    // The OR includes `ownerId` to catch domains with no Registration entity,
-    // but for normal .eth 2LDs that match also pulls in names where the
-    // queried address is just the registry manager / delegate. Keep only
-    // results whose effective owner (wrappedOwner > registrant > owner) is
-    // the queried address — anything else belongs in someone else's portfolio.
-    return filterDisplayable(data.domains).filter((d) => effectiveOwner(d) === lc)
-  })
+    const all: ENSNodeDomain[] = []
+    let skip = 0
+    while (all.length < OWNER_MAX) {
+      const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAINS_BY_OWNER, {
+        owner: lc,
+        parentId: ETH_NODE,
+        first: OWNER_PAGE,
+        skip,
+      })
+      const batch = filterDisplayable(data.domains).filter(
+        (d) => effectiveOwner(d) === lc,
+      )
+      all.push(...batch)
+      // The raw response length tells us when the upstream cursor is
+      // exhausted; the filtered length doesn't (a page can be all
+      // manager-only matches and look like end-of-stream when it isn't).
+      if (data.domains.length < OWNER_PAGE) break
+      skip += OWNER_PAGE
+    }
+    return all
+  }) as Promise<ENSNodeDomain[]>
+
+// Slice locally so manager-only or bracketed entries can't shrink any
+// individual page below the requested `first`.
+export const getDomainsByOwner = async (
+  owner: string,
+  first: number,
+  skip: number,
+): Promise<ENSNodeDomain[]> => {
+  const all = await fetchAllOwnerDomains(owner)
+  return all.slice(skip, skip + first)
+}
 
 const GET_EXPIRY_DATES = `${DOMAIN_FRAGMENT}
 query GetExpiryDates($names: [String!]!) {

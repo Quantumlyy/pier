@@ -110,6 +110,74 @@ describe('getDomainsByOwner', () => {
     expect(query).toContain('or:')
   })
 
+  test('returns full pages of `first` items even when manager-only matches mix in', async () => {
+    // ENSNode batch returns 6 raw rows: 3 owned by the queried wallet,
+    // 3 manager-only. With (first=3, skip=0) we should still get 3 owned
+    // names, not the leftover-after-filter.
+    const me = '0xa11ce0000000000000000000000000000000a11c'
+    const other = '0xb0b00000000000000000000000000000000000b0'
+    const mine = (n: string) => ({
+      id: '0x' + n,
+      name: n + '.eth',
+      labelName: n,
+      owner: { id: me },
+      wrappedOwner: null,
+      registrant: { id: me },
+      expiryDate: '1900000000',
+      createdAt: '1500000000',
+      registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+    })
+    const managerOnly = (n: string) => ({
+      ...mine(n),
+      registrant: { id: other }, // someone else holds the NFT
+    })
+    let n = 0
+    installFetch(() => {
+      n++
+      if (n === 1) {
+        return ok({
+          domains: [
+            mine('a'),
+            managerOnly('m1'),
+            mine('b'),
+            managerOnly('m2'),
+            mine('c'),
+            managerOnly('m3'),
+          ],
+        })
+      }
+      return ok({ domains: [] }) // exhausted
+    })
+    const page = await getDomainsByOwner(me, 3, 0)
+    expect(page.map((d) => d.name)).toEqual(['a.eth', 'b.eth', 'c.eth'])
+  })
+
+  test('paginates locally from a per-owner cached fetch', async () => {
+    const me = '0xb0b00000000000000000000000000000000000b0'
+    const mine = (n: string) => ({
+      id: '0x' + n,
+      name: n + '.eth',
+      labelName: n,
+      owner: { id: me },
+      wrappedOwner: null,
+      registrant: { id: me },
+      expiryDate: '1900000000',
+      createdAt: '1500000000',
+      registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+    })
+    const { calls } = installFetch(() =>
+      ok({ domains: ['a', 'b', 'c', 'd', 'e'].map(mine) }),
+    )
+    const p0 = await getDomainsByOwner(me, 2, 0)
+    const p1 = await getDomainsByOwner(me, 2, 2)
+    const p2 = await getDomainsByOwner(me, 2, 4)
+    expect(p0.map((d) => d.name)).toEqual(['a.eth', 'b.eth'])
+    expect(p1.map((d) => d.name)).toEqual(['c.eth', 'd.eth'])
+    expect(p2.map((d) => d.name)).toEqual(['e.eth'])
+    // Three pages → one upstream call (the per-owner fetch is cached).
+    expect(calls.length).toBeLessThanOrEqual(2) // one or two ENSNode pages depending on internal page-size end-detection
+  })
+
   test('drops manager-only matches whose effective owner is someone else', async () => {
     // The OR filter pulled this domain in via `ownerId`, but the registrant
     // (NFT holder) is a different address — it doesn't belong in the queried
