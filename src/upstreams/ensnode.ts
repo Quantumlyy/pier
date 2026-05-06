@@ -124,16 +124,21 @@ export const searchByContains = (needle: string, first: number, skip: number) =>
     return filterDisplayable(data.domains)
   })
 
-// Wrapped names land in the registry under the NameWrapper contract, with the
-// effective owner held in `wrappedOwner`. A naive `ownerId == addr` filter
-// drops every wrapped name the user holds, so we OR-compose against
-// wrappedOwnerId too. ENSNode's Domain_filter supports `or:`.
+// A user's portfolio can hold a .eth 2LD via three different ENSNode fields:
+//   - wrappedOwnerId : wrapped names (registry owner is the NameWrapper)
+//   - registrantId   : BaseRegistrar NFT holder (manager may be delegated)
+//   - ownerId        : registry manager (only authoritative if not delegated)
+// Filtering on any single one drops legitimately-owned names, so OR them.
 const GET_DOMAINS_BY_OWNER = `${DOMAIN_FRAGMENT}
 query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
     where: {
       parentId: $parentId,
-      or: [{ ownerId: $owner }, { wrappedOwnerId: $owner }]
+      or: [
+        { ownerId: $owner },
+        { wrappedOwnerId: $owner },
+        { registrantId: $owner }
+      ]
     }
     orderBy: name
     orderDirection: asc

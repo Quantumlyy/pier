@@ -100,12 +100,13 @@ describe('getDomainsByOwner', () => {
     expect(calls[0]?.body.variables.owner).toBe('0xabcdef1234567890abcdef1234567890abcdef12')
   })
 
-  test('OR-composes ownerId and wrappedOwnerId in the GraphQL query', async () => {
+  test('OR-composes ownerId, wrappedOwnerId, and registrantId in the query', async () => {
     const { calls } = installFetch(() => ok({ domains: [] }))
     await getDomainsByOwner('0xabc', 10, 0)
     const query = calls[0]?.body.query ?? ''
     expect(query).toContain('ownerId: $owner')
     expect(query).toContain('wrappedOwnerId: $owner')
+    expect(query).toContain('registrantId: $owner')
     expect(query).toContain('or:')
   })
 
