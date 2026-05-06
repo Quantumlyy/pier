@@ -483,6 +483,51 @@ describe('GET /roll', () => {
     expect(r.body.domains.length).toBeLessThanOrEqual(2)
     for (const d of r.body.domains) expect(d.name).toMatch(/\.eth$/)
   })
+
+  test('filters by status=registered', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    installFetch(() =>
+      gqlOk({
+        domains: [
+          ensDomain('vitalik.eth', {
+            registration: { registrationDate: '0', expiryDate: String(now + 365 * 86_400) },
+          }),
+          ensDomain('nick.eth', {
+            registration: { registrationDate: '0', expiryDate: String(now + 365 * 86_400) },
+          }),
+        ],
+      }),
+    )
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/roll?limit=5&status=registered'),
+    )
+    expect(r.body.domains.length).toBeGreaterThan(0)
+    for (const d of r.body.domains) expect(['vitalik.eth', 'nick.eth']).toContain(d.name)
+  })
+
+  test('returns empty when no pool member matches the requested status', async () => {
+    // Pool is all currently registered, but we ask for premium_unregistered.
+    const now = Math.floor(Date.now() / 1000)
+    installFetch(() =>
+      gqlOk({
+        domains: [
+          ensDomain('vitalik.eth', {
+            registration: { registrationDate: '0', expiryDate: String(now + 365 * 86_400) },
+          }),
+        ],
+      }),
+    )
+    const r = await json<{ domains: unknown[] }>(
+      req.get('/roll?limit=5&status=premium_unregistered'),
+    )
+    expect(r.body.domains).toEqual([])
+  })
+
+  test('buy_now is Reservoir-shaped and returns empty', async () => {
+    installFetch(() => gqlOk({ domains: [] }))
+    const r = await json<{ domains: unknown[] }>(req.get('/roll?status=buy_now&limit=3'))
+    expect(r.body.domains).toEqual([])
+  })
 })
 
 describe('GET /info/domain/expires', () => {

@@ -221,10 +221,28 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
   .get(
     '/roll',
     async ({ query }) => {
+      // Frontend RollStatus values lowercase to: buy_now, registered, grace,
+      // premium_unregistered, unregistered. buy_now is Reservoir-shaped
+      // listing state we don't have; the others map onto domainStatus.
+      const status = (query.status ?? '').toLowerCase()
+      if (status === 'buy_now') return { domains: [] }
+      const ROLL_STATUS_MAP: Record<string, DomainStatus[]> = {
+        registered: ['registered'],
+        grace: ['grace'],
+        premium_unregistered: ['premium'],
+        unregistered: ['previously_owned', 'new'],
+      }
+      const allowed = ROLL_STATUS_MAP[status]
       const limit = Math.min(Math.max(Number(query.limit ?? 1) || 1, 1), ROLL_POOL.length)
       const fetched = await getExpiryDates(ROLL_POOL)
       const byName = new Map(fetched.map((d) => [d.name ?? '', d]))
-      const shuffled = [...ROLL_POOL].sort(() => Math.random() - 0.5).slice(0, limit)
+      const candidates = allowed
+        ? ROLL_POOL.filter((n) => {
+            const d = byName.get(n)
+            return d != null && allowed.includes(domainStatus(d))
+          })
+        : [...ROLL_POOL]
+      const shuffled = candidates.sort(() => Math.random() - 0.5).slice(0, limit)
       const domains = shuffled
         .map((name) => byName.get(name))
         .filter((d): d is NonNullable<typeof d> => d != null)
@@ -234,6 +252,8 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
     {
       query: TRollQuery,
       response: TDomainsResponse,
-      detail: { summary: 'Random pick from a hardcoded pool of well-known names' },
+      detail: {
+        summary: 'Random pick from a hardcoded pool, filtered by lifecycle status',
+      },
     },
   )
