@@ -60,7 +60,8 @@ describe('searchByPrefix', () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.name).toBe('vital.eth')
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.body.variables).toEqual({ prefix: 'vital', first: 5, skip: 10 })
+    expect(calls[0]?.body.variables).toMatchObject({ prefix: 'vital', first: 5, skip: 10 })
+    expect(calls[0]?.body.variables.parentId).toMatch(/^0x[0-9a-f]{64}$/)
     expect(calls[0]?.url).toContain('ensnode')
   })
 
@@ -77,7 +78,7 @@ describe('searchByContains', () => {
   test('passes the needle variable', async () => {
     const { calls } = installFetch(() => ok({ domains: [] }))
     await searchByContains('itali', 3, 0)
-    expect(calls[0]?.body.variables).toEqual({ needle: 'itali', first: 3, skip: 0 })
+    expect(calls[0]?.body.variables).toMatchObject({ needle: 'itali', first: 3, skip: 0 })
   })
 
   test('cache key is independent from searchByPrefix', async () => {
@@ -123,6 +124,32 @@ describe('getDomainByName', () => {
     installFetch(() => ok({ domains: [] }))
     const result = await getDomainByName('does-not-exist.eth')
     expect(result).toBeNull()
+  })
+})
+
+describe('eth-parent + displayability filter', () => {
+  test('search/owner queries pass parentId = namehash("eth")', async () => {
+    const { calls } = installFetch(() => ok({ domains: [] }))
+    await searchByPrefix('a', 1, 0)
+    await searchByContains('b', 1, 0)
+    await getDomainsByOwner('0x' + '0'.repeat(40), 1, 0)
+    const eth = '0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae'
+    for (const c of calls) expect(c.body?.variables.parentId).toBe(eth)
+  })
+
+  test('encoded-label and multi-label results are filtered out post-fetch', async () => {
+    installFetch(() =>
+      ok({
+        domains: [
+          domain('vitalik.eth'),
+          domain('[abc123].eth', { labelName: '[abc123]' }),
+          domain('sub.vitalik.eth', { labelName: 'sub' }),
+          { ...domain('weird'), name: 'weird' }, // missing .eth
+        ],
+      }),
+    )
+    const result = await searchByPrefix('v', 10, 0)
+    expect(result.map((d) => d.name)).toEqual(['vitalik.eth'])
   })
 })
 

@@ -2,6 +2,27 @@ import { env } from '../env.ts'
 import { ensCache } from '../lib/cache.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 
+// namehash('eth') — every BaseRegistrar second-level name has this as its
+// parent. Filtering by parentId at the query level eliminates .base.eth /
+// .linea.eth / subdomains in one shot; ENSNode confirms support via the
+// Domain_filter `parentId` input.
+const ETH_NODE = '0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae'
+
+// Domains for non-decodable labels come back as "[<hex>].eth" with a
+// bracketed labelName. The frontend can't render or operate on those
+// (registration, getDomainHexId, Reservoir lookups all assume a normal
+// label), so drop them before shaping.
+const isBaseRegistrarDisplayable = (d: ENSNodeDomain): boolean => {
+  if (!d.name || !d.name.endsWith('.eth')) return false
+  if (d.name.split('.').length !== 2) return false
+  const label = d.labelName ?? d.name.slice(0, -'.eth'.length)
+  if (!label || label.startsWith('[')) return false
+  return true
+}
+
+const filterDisplayable = (domains: ENSNodeDomain[]): ENSNodeDomain[] =>
+  domains.filter(isBaseRegistrarDisplayable)
+
 const DOMAIN_FRAGMENT = `
 fragment DomainFields on Domain {
   id
@@ -59,9 +80,9 @@ const cached = <T>(name: string, args: unknown, fn: () => Promise<T>): Promise<T
   ensCache.getOrSet(`${name}:${JSON.stringify(args)}`, fn) as Promise<T>
 
 const SEARCH_BY_PREFIX = `${DOMAIN_FRAGMENT}
-query SearchByPrefix($prefix: String!, $first: Int!, $skip: Int!) {
+query SearchByPrefix($prefix: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
-    where: { name_starts_with: $prefix }
+    where: { name_starts_with: $prefix, parentId: $parentId }
     orderBy: name
     orderDirection: asc
     first: $first
@@ -71,14 +92,19 @@ query SearchByPrefix($prefix: String!, $first: Int!, $skip: Int!) {
 
 export const searchByPrefix = (prefix: string, first: number, skip: number) =>
   cached('searchByPrefix', { prefix, first, skip }, async () => {
-    const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_PREFIX, { prefix, first, skip })
-    return data.domains
+    const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_PREFIX, {
+      prefix,
+      parentId: ETH_NODE,
+      first,
+      skip,
+    })
+    return filterDisplayable(data.domains)
   })
 
 const SEARCH_BY_CONTAINS = `${DOMAIN_FRAGMENT}
-query SearchByContains($needle: String!, $first: Int!, $skip: Int!) {
+query SearchByContains($needle: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
-    where: { name_contains: $needle }
+    where: { name_contains: $needle, parentId: $parentId }
     orderBy: name
     orderDirection: asc
     first: $first
@@ -88,14 +114,19 @@ query SearchByContains($needle: String!, $first: Int!, $skip: Int!) {
 
 export const searchByContains = (needle: string, first: number, skip: number) =>
   cached('searchByContains', { needle, first, skip }, async () => {
-    const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_CONTAINS, { needle, first, skip })
-    return data.domains
+    const data = await gql<{ domains: ENSNodeDomain[] }>(SEARCH_BY_CONTAINS, {
+      needle,
+      parentId: ETH_NODE,
+      first,
+      skip,
+    })
+    return filterDisplayable(data.domains)
   })
 
 const GET_DOMAINS_BY_OWNER = `${DOMAIN_FRAGMENT}
-query GetDomainsByOwner($owner: String!, $first: Int!, $skip: Int!) {
+query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(
-    where: { owner: $owner }
+    where: { ownerId: $owner, parentId: $parentId }
     orderBy: name
     orderDirection: asc
     first: $first
@@ -107,10 +138,11 @@ export const getDomainsByOwner = (owner: string, first: number, skip: number) =>
   cached('getDomainsByOwner', { owner, first, skip }, async () => {
     const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAINS_BY_OWNER, {
       owner: owner.toLowerCase(),
+      parentId: ETH_NODE,
       first,
       skip,
     })
-    return data.domains
+    return filterDisplayable(data.domains)
   })
 
 const GET_EXPIRY_DATES = `${DOMAIN_FRAGMENT}
