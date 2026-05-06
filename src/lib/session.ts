@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import { getCookie, setCookie } from 'hono/cookie'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { generateNonce } from 'siwe'
 
 import { env } from '../env.ts'
@@ -61,6 +61,12 @@ export const issueSessionCookie = (c: Context, sessionId: string): void => {
     sameSite: 'Lax',
     secure: env.NODE_ENV === 'production',
   })
+}
+
+export const revokeSession = (c: Context): void => {
+  const id = getCookie(c, COOKIE_NAME) ?? c.req.header('id')
+  if (id) sessions.delete(id)
+  deleteCookie(c, COOKIE_NAME, { path: '/' })
 }
 
 export const requireAuth: MiddlewareHandler = async (c, next) => {

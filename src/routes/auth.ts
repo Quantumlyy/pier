@@ -8,10 +8,15 @@ import {
   getSession,
   issueNonce,
   issueSessionCookie,
+  revokeSession,
 } from '../lib/session.ts'
 
 export const authRoutes = new Hono()
   .get('/nonce', (c) => {
+    // RainbowKit's signOut adapter calls GET /nonce expecting it to wipe the
+    // existing session — jetty did this as a side effect of issuing a fresh
+    // nonce, and the frontend explicitly comments on the behavior.
+    revokeSession(c)
     c.header('content-type', 'text/plain; charset=utf-8')
     return c.body(issueNonce())
   })
