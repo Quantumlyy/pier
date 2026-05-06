@@ -41,14 +41,17 @@ type SearchFilters = {
   minLength: number | undefined
   maxLength: number | undefined
   symbolTypes: Set<'letters' | 'numbers' | 'emojis'>
-  status: DomainStatus | undefined
+  // The frontend's status buttons map to one or more lifecycle buckets:
+  // Unregistered covers both the 30-day "new" buffer (111-141d past expiry)
+  // and long-released names, since both are registerable at standard pricing.
+  status: DomainStatus[] | undefined
 }
 
-const STATUS_TYPE_MAP: Record<string, DomainStatus> = {
-  new: 'new',
-  premium: 'premium',
-  previously_owned: 'previously_owned',
-  grace: 'grace',
+const STATUS_TYPE_MAP: Record<string, DomainStatus[]> = {
+  new: ['new'],
+  premium: ['premium'],
+  previously_owned: ['previously_owned', 'new'],
+  grace: ['grace'],
 }
 
 const parseFilters = (q: Record<string, string | undefined>): SearchFilters => {
@@ -107,7 +110,7 @@ const passesFilters = (d: ENSNodeDomain, f: SearchFilters): boolean => {
   if (f.minLength !== undefined && len < f.minLength) return false
   if (f.maxLength !== undefined && len > f.maxLength) return false
   if (!symbolMatches(label, f.symbolTypes)) return false
-  if (f.status !== undefined && domainStatus(d) !== f.status) return false
+  if (f.status !== undefined && !f.status.includes(domainStatus(d))) return false
   return true
 }
 

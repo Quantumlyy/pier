@@ -287,6 +287,32 @@ describe('GET /search/plain', () => {
     expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
   })
 
+  test('status_type=previously_owned covers both `new` (111-141d) and `previously_owned`', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    const dayAgo = (n: number) => String(now - n * 86_400)
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            // 100d past: premium → excluded
+            ensDomain('still-premium.eth', { registration: { registrationDate: '0', expiryDate: dayAgo(100) } }),
+            // 130d past: new (within the 30-day buffer) → kept (already registerable)
+            ensDomain('fresh-released.eth', { registration: { registrationDate: '0', expiryDate: dayAgo(130) } }),
+            // 200d past: previously_owned → kept
+            ensDomain('long-released.eth', { registration: { registrationDate: '0', expiryDate: dayAgo(200) } }),
+          ],
+        })
+      }
+      return gqlOk({ domains: [] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=z&limit=10&status_type=previously_owned'),
+    )
+    expect(r.body.domains.map((d) => d.name).sort()).toEqual(
+      ['fresh-released.eth', 'long-released.eth'].sort(),
+    )
+  })
+
   test('honors status_type=premium', async () => {
     const now = Math.floor(Date.now() / 1000)
     const dayAgo = (n: number) => String(now - n * 86_400)
