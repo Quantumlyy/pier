@@ -331,6 +331,28 @@ describe('GET /search/plain', () => {
     expect(r.body.domains.map((d) => d.name)).toEqual(['abc.eth'])
   })
 
+  test('name_symbols_type=letters,numbers broadens to include mixed labels', async () => {
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            ensDomain('abc.eth', { labelName: 'abc' }), // pure letters
+            ensDomain('123.eth', { labelName: '123' }), // pure numbers
+            ensDomain('abc123.eth', { labelName: 'abc123' }), // mixed
+            ensDomain('hi🌟.eth', { labelName: 'hi🌟' }), // letter + emoji
+          ],
+        })
+      }
+      return gqlOk({ domains: [] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=z&limit=10&name_symbols_type=letters,numbers'),
+    )
+    expect(r.body.domains.map((d) => d.name).sort()).toEqual(
+      ['123.eth', 'abc.eth', 'abc123.eth'].sort(),
+    )
+  })
+
   test('honors name_symbols_type=numbers', async () => {
     installFetch(({ body }) => {
       if (body?.variables.prefix !== undefined) {

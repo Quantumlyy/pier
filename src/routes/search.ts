@@ -81,18 +81,24 @@ const labelOf = (d: ENSNodeDomain): string =>
 // effectively reflected too.
 const labelLength = (label: string): number => Array.from(label).length
 
-const LETTERS_ONLY = /^[a-z]+$/i
-const NUMBERS_ONLY = /^[0-9]+$/
-// Coarse emoji detector: anything in the supplementary plane plus the
-// common BMP ranges used by emojis. Good enough for the type filter.
-const HAS_EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}]/u
+const LETTER_CLASS = '[a-zA-Z]'
+const NUMBER_CLASS = '[0-9]'
+// Coarse emoji ranges: supplementary plane plus the common BMP ranges
+// (dingbats, miscellaneous symbols). Good enough for the type filter.
+const EMOJI_CLASS = '[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2700}-\\u{27BF}\\u{1F000}-\\u{1F02F}]'
 
+// Selected types broaden the match: { letters, numbers } means "label
+// consists of characters drawn from the union of letters and numbers"
+// (so `abc123` passes), not "all letters OR all numbers" (which the
+// previous logic tested, narrowing the filter incorrectly).
 const symbolMatches = (label: string, types: SearchFilters['symbolTypes']): boolean => {
   if (types.size === 0) return true
-  if (types.has('letters') && LETTERS_ONLY.test(label)) return true
-  if (types.has('numbers') && NUMBERS_ONLY.test(label)) return true
-  if (types.has('emojis') && HAS_EMOJI.test(label)) return true
-  return false
+  const parts: string[] = []
+  if (types.has('letters')) parts.push(LETTER_CLASS)
+  if (types.has('numbers')) parts.push(NUMBER_CLASS)
+  if (types.has('emojis')) parts.push(EMOJI_CLASS)
+  const allowed = new RegExp(`^(?:${parts.join('|')})+$`, 'u')
+  return allowed.test(label)
 }
 
 const passesFilters = (d: ENSNodeDomain, f: SearchFilters): boolean => {
