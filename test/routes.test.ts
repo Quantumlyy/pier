@@ -234,25 +234,27 @@ describe('GET /search/plain', () => {
     expect(prefixCall?.body?.variables.prefix).toBe('vitalik')
   })
 
-  test('prepends the exact match on the first page', async () => {
+  test('prepends the exact match on the first page (no trimming)', async () => {
     let n = 0
     installFetch(({ body }) => {
       n++
-      // First call is searchByPrefix and getDomainByName in parallel; we
-      // distinguish them by which variable is present.
       if (body?.variables.prefix !== undefined) {
-        // Prefix page returns a couple of hyphenated names ahead of the exact match
         return gqlOk({
           domains: [ensDomain('vital-foo.eth'), ensDomain('vital-bar.eth')],
         })
       }
-      // getDomainByName lookup
       return gqlOk({ domains: [ensDomain('vital.eth')] })
     })
     const r = await json<{ domains: { name: string }[] }>(
       req.get('/search/plain?name=vital&limit=2&offset=0'),
     )
-    expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
+    // Page 0 may exceed limit by one — by design, so the alphabetical-tail
+    // item isn't dropped between pages. Frontend handles variable page sizes.
+    expect(r.body.domains.map((d) => d.name)).toEqual([
+      'vital.eth',
+      'vital-foo.eth',
+      'vital-bar.eth',
+    ])
     expect(n).toBe(2)
   })
 
@@ -312,11 +314,86 @@ describe('GET /search/plain', () => {
     expect(r2.body.domains.map((d) => d.name)).toEqual(['123.eth'])
   })
 
-  test('does not fetch the exact match for offset > 0', async () => {
-    const { calls } = installFetch(() => gqlOk({ domains: [] }))
-    await json(req.get('/search/plain?name=vital&limit=10&offset=10'))
-    const exactCall = calls.find((c) => c.body?.variables.name === 'vital.eth')
-    expect(exactCall).toBeUndefined()
+  test('filters the exact match out of later pages and never duplicates it', async () => {
+    // Page at offset=5 happens to contain vital.eth alphabetically — pier
+    // must drop it because it was already shown prepended on page 0.
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            ensDomain('vital-f.eth'),
+            ensDomain('vital-g.eth'),
+            ensDomain('vital.eth'),
+            ensDomain('vital2.eth'),
+            ensDomain('vitality.eth'),
+          ],
+        })
+      }
+      return gqlOk({ domains: [ensDomain('vital.eth')] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=5&offset=5'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual([
+      'vital-f.eth',
+      'vital-g.eth',
+      'vital2.eth',
+      'vitality.eth',
+    ])
+    expect(r.body.domains.find((d) => d.name === 'vital.eth')).toBeUndefined()
+  })
+
+  test('does not skip the alphabetical-tail item between pages 0 and 1', async () => {
+    // Page 0: prefix returns 5 hyphenated names; exact prepended → 6 items.
+    // Page 1: prefix returns the next batch starting with v-e (the item that
+    // would have been dropped by a trim-to-limit on page 0).
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        const skip = Number(body.variables.skip ?? 0)
+        if (skip === 0) {
+          return gqlOk({
+            domains: [
+              ensDomain('vital-a.eth'),
+              ensDomain('vital-b.eth'),
+              ensDomain('vital-c.eth'),
+              ensDomain('vital-d.eth'),
+              ensDomain('vital-e.eth'),
+            ],
+          })
+        }
+        return gqlOk({
+          domains: [
+            ensDomain('vital-f.eth'),
+            ensDomain('vital-g.eth'),
+            ensDomain('vital-h.eth'),
+            ensDomain('vital-i.eth'),
+            ensDomain('vital-j.eth'),
+          ],
+        })
+      }
+      return gqlOk({ domains: [ensDomain('vital.eth')] })
+    })
+    const p0 = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=5&offset=0'),
+    )
+    const p1 = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=vital&limit=5&offset=5'),
+    )
+    expect(p0.body.domains.map((d) => d.name)).toEqual([
+      'vital.eth',
+      'vital-a.eth',
+      'vital-b.eth',
+      'vital-c.eth',
+      'vital-d.eth',
+      'vital-e.eth',
+    ])
+    expect(p1.body.domains.map((d) => d.name)).toEqual([
+      'vital-f.eth',
+      'vital-g.eth',
+      'vital-h.eth',
+      'vital-i.eth',
+      'vital-j.eth',
+    ])
   })
 })
 

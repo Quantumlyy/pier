@@ -110,18 +110,22 @@ const upstreamLimit = (limit: number, f: SearchFilters): number =>
 // `name_starts_with` ordered alphabetically puts every "${name}-..." domain
 // (hyphen 0x2D < period 0x2E) before "${name}.eth", so the exact registered
 // name routinely falls off the first page. The frontend reads its absence as
-// "unregistered" and offers to register a name someone already owns. On the
-// first page, fetch the exact match in parallel and prepend it.
+// "unregistered" and offers to register a name someone already owns.
+//
+// On every page, drop the exact match from the prefix results. On page 0
+// only, prepend it. That gives the exact match a deterministic position 0
+// without losing or duplicating the alphabetical-tail item across pages —
+// page 0 may exceed `limit` by one (frontend handles variable page sizes
+// via pageParam + 1), and the caller is free to slice if needed.
 const withExactPrepended = async (
   fetcher: () => Promise<ENSNodeDomain[]>,
   fullName: string,
-  limit: number,
   offset: number,
 ): Promise<ENSNodeDomain[]> => {
-  if (offset !== 0) return fetcher()
   const [exact, page] = await Promise.all([getDomainByName(fullName), fetcher()])
-  if (!exact || page.some((d) => d.name === fullName)) return page
-  return [exact, ...page].slice(0, limit)
+  if (!exact) return page
+  const filtered = page.filter((d) => d.name !== fullName)
+  return offset === 0 ? [exact, ...filtered] : filtered
 }
 
 export const searchRoutes = new Elysia({ tags: ['search'] })
@@ -136,11 +140,14 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
         ? await withExactPrepended(
             () => searchByPrefix(name, fetchLimit, offset),
             `${name}.eth`,
-            fetchLimit,
             offset,
           )
         : await browseRecent(fetchLimit, offset)
-      const domains = applyFilters(raw, filters).slice(0, limit)
+      // Only slice when filters consumed excess from over-fetch; for the
+      // unfiltered path, let page 0 exceed `limit` by one when the exact
+      // match is prepended (frontend handles variable page sizes).
+      const filtered = applyFilters(raw, filters)
+      const domains = filtersActive(filters) ? filtered.slice(0, limit) : filtered
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
@@ -164,11 +171,14 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
         ? await withExactPrepended(
             () => searchByContains(name, fetchLimit, offset),
             `${name}.eth`,
-            fetchLimit,
             offset,
           )
         : await browseRecent(fetchLimit, offset)
-      const domains = applyFilters(raw, filters).slice(0, limit)
+      // Only slice when filters consumed excess from over-fetch; for the
+      // unfiltered path, let page 0 exceed `limit` by one when the exact
+      // match is prepended (frontend handles variable page sizes).
+      const filtered = applyFilters(raw, filters)
+      const domains = filtersActive(filters) ? filtered.slice(0, limit) : filtered
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
