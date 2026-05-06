@@ -1,6 +1,6 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 
-export const feedRoutes = new Hono()
-  .get('/feed/activity/domain', (c) => c.json({ events: [] }))
-  .get('/feed/events', (c) => c.json({ events: [] }))
-  .get('/feed/aggregate', (c) => c.json({ aggregations: [] }))
+export const feedRoutes = new Elysia()
+  .get('/feed/activity/domain', () => ({ events: [] }))
+  .get('/feed/events', () => ({ events: [] }))
+  .get('/feed/aggregate', () => ({ aggregations: [] }))

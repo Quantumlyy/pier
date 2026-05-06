@@ -1,3 +1,3 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 
-export const healthRoutes = new Hono().get('/health_check', (c) => c.json({ stable: true }))
+export const healthRoutes = new Elysia().get('/health_check', () => ({ stable: true }))

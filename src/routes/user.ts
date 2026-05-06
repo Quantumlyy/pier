@@ -1,26 +1,37 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 
-import { requireAuth } from '../lib/session.ts'
+import { SESSION_COOKIE_NAME, readSessionId, resolveSession } from '../lib/session.ts'
 import { toMarketplaceDomain } from '../lib/shape.ts'
 import { getDomainsByOwner } from '../upstreams/ensnode.ts'
 
-const isAddress = (raw: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(raw)
+const isAddress = (raw: string | undefined): raw is string =>
+  !!raw && /^0x[0-9a-fA-F]{40}$/.test(raw)
 
-export const userRoutes = new Hono()
-  .get('/domains/owner', async (c) => {
-    const owner = c.req.query('owner') ?? ''
-    if (!isAddress(owner)) return c.json({ domains: [] })
-    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 30) || 30, 1), 100)
-    const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0)
-    const domains = await getDomainsByOwner(owner, limit, offset)
-    return c.json({ domains: domains.map(toMarketplaceDomain) })
+const authed = new Elysia({ name: 'authed' }).resolve(
+  { as: 'scoped' },
+  ({ cookie, headers, status }) => {
+    const sid = readSessionId(cookie[SESSION_COOKIE_NAME]?.value, headers.id)
+    const session = resolveSession(sid)
+    if (!session) return status(401, { error: 'unauthenticated' })
+    return { session }
+  },
+)
+
+export const userRoutes = new Elysia()
+  .get('/domains/owner', async ({ query }) => {
+    if (!isAddress(query.owner)) return { domains: [] }
+    const limit = Math.min(Math.max(Number(query.limit ?? 30) || 30, 1), 100)
+    const offset = Math.max(Number(query.offset ?? 0) || 0, 0)
+    const domains = await getDomainsByOwner(query.owner, limit, offset)
+    return { domains: domains.map(toMarketplaceDomain) }
   })
+  .use(authed)
   // Likes — Reservoir-shaped social state, frontend already mirrors this in Redux.
-  .get('/user/like', requireAuth, (c) => c.json({ domains: [] }))
-  .post('/user/like', requireAuth, (c) => c.body(null, 204))
-  .delete('/user/like', requireAuth, (c) => c.body(null, 204))
+  .get('/user/like', () => ({ domains: [] }))
+  .post('/user/like', ({ status }) => status(204))
+  .delete('/user/like', ({ status }) => status(204))
   // Cart — frontend keeps the canonical state in Redux+localStorage.
-  .get('/user/cart/list', requireAuth, (c) => c.json([]))
-  .post('/user/cart/modify', requireAuth, (c) => c.body(null, 204))
-  .delete('/user/cart/modify', requireAuth, (c) => c.body(null, 204))
-  .delete('/user/cart/clear', requireAuth, (c) => c.body(null, 204))
+  .get('/user/cart/list', () => [])
+  .post('/user/cart/modify', ({ status }) => status(204))
+  .delete('/user/cart/modify', ({ status }) => status(204))
+  .delete('/user/cart/clear', ({ status }) => status(204))

@@ -1,7 +1,7 @@
-import { Hono } from 'hono'
+import { Elysia } from 'elysia'
 
 import { defaultTotalStats } from '../lib/shape.ts'
 
-export const statsRoutes = new Hono()
-  .get('/total_stats', (c) => c.json(defaultTotalStats()))
-  .get('/floor_price', (c) => c.json({ domains: [] }))
+export const statsRoutes = new Elysia()
+  .get('/total_stats', () => defaultTotalStats())
+  .get('/floor_price', () => ({ domains: [] }))

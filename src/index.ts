@@ -1,8 +1,7 @@
-import { Hono } from 'hono'
-import { logger } from 'hono/logger'
+import { cors } from '@elysiajs/cors'
+import { Elysia } from 'elysia'
 
 import { env } from './env.ts'
-import { cors } from './lib/cors.ts'
 import { authRoutes } from './routes/auth.ts'
 import { domainRoutes } from './routes/domain.ts'
 import { feedRoutes } from './routes/feed.ts'
@@ -11,25 +10,31 @@ import { searchRoutes } from './routes/search.ts'
 import { statsRoutes } from './routes/stats.ts'
 import { userRoutes } from './routes/user.ts'
 
-const app = new Hono()
+export const buildApp = () =>
+  new Elysia()
+    .use(
+      cors({
+        origin: env.ALLOWED_ORIGINS,
+        credentials: true,
+        methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['content-type', 'id', 'cookie', 'accept'],
+        maxAge: 600,
+      }),
+    )
+    .onError(({ error, code }) => {
+      if (code === 'NOT_FOUND') return { error: 'not found' }
+      console.error('[pier] unhandled error:', error)
+      return { error: error instanceof Error ? error.message : 'internal error' }
+    })
+    .use(healthRoutes)
+    .use(authRoutes)
+    .use(searchRoutes)
+    .use(domainRoutes)
+    .use(userRoutes)
+    .use(statsRoutes)
+    .use(feedRoutes)
 
-app.use('*', cors)
-app.use('*', logger())
-
-app.onError((err, c) => {
-  console.error('[pier] unhandled error:', err)
-  return c.json({ error: err.message }, 500)
-})
-
-app.notFound((c) => c.json({ error: 'not found', path: c.req.path }, 404))
-
-app.route('/', healthRoutes)
-app.route('/', authRoutes)
-app.route('/', searchRoutes)
-app.route('/', domainRoutes)
-app.route('/', userRoutes)
-app.route('/', statsRoutes)
-app.route('/', feedRoutes)
-
-const server = Bun.serve({ port: env.PORT, fetch: app.fetch })
-console.log(`pier listening on http://localhost:${server.port}`)
+if (import.meta.main) {
+  const app = buildApp().listen(env.PORT)
+  console.log(`pier listening on http://localhost:${app.server?.port ?? env.PORT}`)
+}
