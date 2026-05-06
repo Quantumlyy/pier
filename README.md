@@ -39,6 +39,18 @@ If you'd rather not edit kodex-interface (the project's no-modify-frontend rule 
 
 The interactive API browser is at <http://localhost:8000/docs> (Scalar) and the raw OpenAPI spec at <http://localhost:8000/docs/json>.
 
+### Docker
+
+A multi-stage Dockerfile (per [Elysia's deploy guide](https://elysiajs.com/patterns/deploy)) compiles a single static binary on the Bun image and ships it from `gcr.io/distroless/base`. End image is ~140 MB with no shell, no Node, no Bun runtime — just the binary.
+
+```bash
+docker build -t pier .
+docker run --rm -p 8000:8000 pier
+# or override env: -e ENSNODE_URL=... -e ALLOWED_ORIGINS=https://my.frontend
+```
+
+`PORT`, `ENSNODE_URL`, `ALLOWED_ORIGINS`, `SESSION_TTL_MS`, and `NODE_ENV` are all picked up from the container env. There's no HEALTHCHECK directive in the Dockerfile — point your orchestrator's HTTP probe at `/health_check`.
+
 ## Environment variables
 
 | var | default | purpose |
