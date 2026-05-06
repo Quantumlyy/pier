@@ -1,6 +1,6 @@
 # pier
 
-A small Bun + Hono service that stands in for the dead `jetty` Rust backend behind [`KodexLabs/kodex-interface`](https://github.com/KodexLabs/kodex-interface). It speaks the routes the frontend's fetchers call, returns JSON in the shape the frontend deserializes, and reads ENS data from [ENSNode](https://ensnode.io) instead of Postgres.
+A small Bun + Elysia service that stands in for the dead `jetty` Rust backend behind [`KodexLabs/kodex-interface`](https://github.com/KodexLabs/kodex-interface). It speaks the routes the frontend's fetchers call, returns JSON in the shape the frontend deserializes, and reads ENS data from [ENSNode](https://ensnode.io) instead of Postgres. Every route's input and output is described by a TypeBox schema, so the OpenAPI spec at `/docs/json` and the Scalar UI at `/docs` stay in lock-step with the implementation.
 
 The original jetty needed Postgres + Redis + an Ethereum archive node + Reservoir + a now-defunct Heroku-hosted vectorisation service. Reviving any of that is out of scope. pier is stateless except for an in-memory session map and an LRU cache, so `bun --hot src/index.ts` is the entire dev story.
 
@@ -36,6 +36,8 @@ bun dev                    # runs on :3071
 If you'd rather not edit kodex-interface (the project's no-modify-frontend rule applies in spirit to pier itself, not to your local dev tree), the alternative is a hosts-file redirect of `jetty.kodex.io` to `127.0.0.1` plus a local TLS proxy in front of pier — more setup, no source edits.
 
 `http://localhost:3071` should boot. Search returns real ENS names, domain detail pages show real owners and expiry dates, SIWE login works, and the portfolio page lists names you actually own. Marketplace buy/sell flows depend on the Reservoir SDK and remain broken — that's expected.
+
+The interactive API browser is at <http://localhost:8000/docs> (Scalar) and the raw OpenAPI spec at <http://localhost:8000/docs/json>.
 
 ## Environment variables
 
@@ -80,22 +82,22 @@ The stubs are not gaps in pier's coverage — they exist because the frontend wi
 
 ```
 src/
-├── index.ts              Hono app + Bun.serve
-├── env.ts                zod-parsed process.env
-├── upstreams/ensnode.ts  GraphQL fetch wrapper + 5 typed helpers
-├── routes/               one file per logical route group
+├── index.ts              Elysia app + @elysiajs/cors + @elysiajs/openapi (Scalar)
+├── env.ts                zod-parsed process.env (+ derived allowedDomains set)
+├── upstreams/ensnode.ts  GraphQL fetch wrapper + 5 typed helpers (cached, single-flight)
+├── routes/               one file per logical route group; each carries its t schemas
 │   ├── health.ts
 │   ├── auth.ts           /nonce, /verify, /authenticate
 │   ├── search.ts         /search/plain, /search/similar, /roll
 │   ├── domain.ts         /info/domain/*
-│   ├── user.ts           /domains/owner, /user/like, /user/cart/*
+│   ├── user.ts           /domains/owner, /user/like, /user/cart/* (auth gate via .resolve)
 │   ├── stats.ts          /total_stats, /floor_price
 │   └── feed.ts           /feed/*
 └── lib/
-    ├── shape.ts          ENSNode Domain → frontend MarketplaceDomainType (tested)
-    ├── cache.ts          30s/1000-entry TTL+LRU with single-flight
-    ├── session.ts        in-memory session map + requireAuth
-    ├── cors.ts           echo-origin CORS w/ credentials
+    ├── shape.ts          ENSNode Domain → MarketplaceDomainType
+    ├── cache.ts          30s/1000-entry TTL+LRU with single-flight dedup
+    ├── session.ts        in-memory sessions + nonce store (single-use, 5min TTL)
+    ├── schemas.ts        TypeBox schemas reused across routes (drives OpenAPI)
     └── types.ts
 ```
 
@@ -114,7 +116,15 @@ Keep upstream code stupid (just fetch + parse) and let `lib/shape.ts` carry the 
 bun test
 ```
 
-Only `lib/shape.ts` is under test. Stubs are not.
+99 tests across 5 files cover:
+
+- **`shape.ts`** — every ENSNode→kodex field mapping, including the labelName/multi-label fallbacks and the expiry source priority.
+- **`cache.ts`** — TTL expiry, LRU eviction, recency promotion on get, single-flight deduplication, errored loaders not poisoning the slot, and post-expiry refetch.
+- **`session.ts`** — nonce single-use + 5-minute TTL, session creation lowercasing, resolve/drop lifecycle and TTL eviction (`spyOn(Date, 'now')`), `readSessionId` precedence.
+- **`upstreams/ensnode.ts`** — gql wrapper with mocked `fetch`: variable passing, owner lowercasing, sorted-input cache keys, retry-once-on-5xx, no-retry-on-4xx, GraphQL `errors[]` propagation.
+- **`routes/*`** — every endpoint exercised in-process via `app.handle(new Request(...))`, with the full SIWE handshake driven by viem (happy path, malformed body, wrong domain, unknown nonce, tampered signature, replay, signOut-via-/nonce), CORS preflight from allowed and disallowed origins, auth gating on `/user/*`, and the `/docs` + `/docs/json` mounts.
+
+Test helpers in `test/helpers.ts` (`installFetch`, `gqlOk`, `ensDomain`, `req.{get,post,del,options}`) keep the assertions short.
 
 ## Known limitations
 

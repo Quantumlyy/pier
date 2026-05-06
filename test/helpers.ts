@@ -70,7 +70,7 @@ const mkRequest = (
   init: { headers?: Record<string, string>; body?: unknown } = {},
 ): Request => {
   const headers = new Headers(init.headers ?? {})
-  let body: BodyInit | undefined
+  let body: string | undefined
   if (init.body !== undefined) {
     body = typeof init.body === 'string' ? init.body : JSON.stringify(init.body)
     if (!headers.has('content-type')) headers.set('content-type', 'application/json')
