@@ -3,6 +3,7 @@ import { logger } from 'hono/logger'
 
 import { env } from './env.ts'
 import { cors } from './lib/cors.ts'
+import { authRoutes } from './routes/auth.ts'
 import { domainRoutes } from './routes/domain.ts'
 import { healthRoutes } from './routes/health.ts'
 import { searchRoutes } from './routes/search.ts'
@@ -21,6 +22,7 @@ app.onError((err, c) => {
 app.notFound((c) => c.json({ error: 'not found', path: c.req.path }, 404))
 
 app.route('/', healthRoutes)
+app.route('/', authRoutes)
 app.route('/', searchRoutes)
 app.route('/', domainRoutes)
 app.route('/', userRoutes)
