@@ -1,7 +1,14 @@
 import { Hono } from 'hono'
 
 import { toMarketplaceDomain } from '../lib/shape.ts'
-import { searchByContains, searchByPrefix } from '../upstreams/ensnode.ts'
+import { getExpiryDates, searchByContains, searchByPrefix } from '../upstreams/ensnode.ts'
+
+const ROLL_POOL = [
+  'vitalik.eth', 'nick.eth', 'brantly.eth', 'sassal.eth', 'cory.eth',
+  'avsa.eth', 'matoken.eth', 'griff.eth', 'jefflau.eth', 'taytems.eth',
+  'noun.eth', 'punks.eth', 'cypherpunk.eth', 'crypto.eth', 'wallet.eth',
+  'metamask.eth', 'rainbow.eth', 'opensea.eth', 'foundation.eth', 'ethereum.eth',
+]
 
 const parsePagination = (limitRaw: string | undefined, offsetRaw: string | undefined) => {
   const limit = Math.min(Math.max(Number(limitRaw ?? 20) || 20, 1), 100)
@@ -30,4 +37,15 @@ export const searchRoutes = new Hono()
     if (!name) return c.json({ domains: [] })
     const domains = await searchByContains(name, limit, offset)
     return c.json({ domains: domains.map(toMarketplaceDomain) })
+  })
+  .get('/roll', async (c) => {
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 1) || 1, 1), ROLL_POOL.length)
+    const fetched = await getExpiryDates(ROLL_POOL)
+    const byName = new Map(fetched.map((d) => [d.name ?? '', d]))
+    const shuffled = [...ROLL_POOL].sort(() => Math.random() - 0.5).slice(0, limit)
+    const domains = shuffled
+      .map((name) => byName.get(name))
+      .filter((d): d is NonNullable<typeof d> => d != null)
+      .map(toMarketplaceDomain)
+    return c.json({ domains })
   })

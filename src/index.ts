@@ -6,6 +6,7 @@ import { cors } from './lib/cors.ts'
 import { domainRoutes } from './routes/domain.ts'
 import { healthRoutes } from './routes/health.ts'
 import { searchRoutes } from './routes/search.ts'
+import { userRoutes } from './routes/user.ts'
 
 const app = new Hono()
 
@@ -22,6 +23,7 @@ app.notFound((c) => c.json({ error: 'not found', path: c.req.path }, 404))
 app.route('/', healthRoutes)
 app.route('/', searchRoutes)
 app.route('/', domainRoutes)
+app.route('/', userRoutes)
 
 const server = Bun.serve({ port: env.PORT, fetch: app.fetch })
 console.log(`pier listening on http://localhost:${server.port}`)
