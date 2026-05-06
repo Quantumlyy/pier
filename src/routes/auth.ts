@@ -1,12 +1,19 @@
 import { Hono } from 'hono'
-import { SiweMessage, generateNonce } from 'siwe'
+import { SiweMessage } from 'siwe'
 
-import { createSession, getSession, issueSessionCookie } from '../lib/session.ts'
+import { allowedDomains } from '../env.ts'
+import {
+  consumeNonce,
+  createSession,
+  getSession,
+  issueNonce,
+  issueSessionCookie,
+} from '../lib/session.ts'
 
 export const authRoutes = new Hono()
   .get('/nonce', (c) => {
     c.header('content-type', 'text/plain; charset=utf-8')
-    return c.body(generateNonce())
+    return c.body(issueNonce())
   })
   .post('/verify', async (c) => {
     const body = (await c.req.json().catch(() => null)) as
@@ -21,8 +28,14 @@ export const authRoutes = new Hono()
     } catch (err) {
       return c.json({ error: `invalid SIWE message: ${(err as Error).message}` }, 400)
     }
+    if (!allowedDomains.has(parsed.domain)) {
+      return c.json({ error: `domain ${parsed.domain} is not allowed` }, 422)
+    }
+    if (!consumeNonce(parsed.nonce)) {
+      return c.json({ error: 'unknown or expired nonce' }, 422)
+    }
     const result = await parsed
-      .verify({ signature: body.signature })
+      .verify({ signature: body.signature, nonce: parsed.nonce, domain: parsed.domain })
       .catch((err) => ({ success: false as const, error: { type: (err as Error).message } }))
     if (!result.success) {
       return c.json({ error: result.error?.type ?? 'signature verification failed' }, 422)

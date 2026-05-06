@@ -13,3 +13,13 @@ const schema = z.object({
 
 export const env = schema.parse(process.env)
 export type Env = typeof env
+
+export const allowedDomains = new Set(
+  env.ALLOWED_ORIGINS.map((origin) => {
+    try {
+      return new URL(origin).host
+    } catch {
+      return origin
+    }
+  }),
+)

@@ -1,21 +1,38 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
+import { generateNonce } from 'siwe'
 
 import { env } from '../env.ts'
 
 type Session = { address: string; expiresAt: number }
 
 const sessions = new Map<string, Session>()
+const nonces = new Map<string, number>()
 
 const COOKIE_NAME = 'id'
 const SWEEP_INTERVAL_MS = 60_000
+const NONCE_TTL_MS = 5 * 60_000
 
 const sweep = () => {
   const now = Date.now()
   for (const [id, s] of sessions) if (s.expiresAt <= now) sessions.delete(id)
+  for (const [n, expiresAt] of nonces) if (expiresAt <= now) nonces.delete(n)
 }
 const sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS)
 sweepTimer.unref?.()
+
+export const issueNonce = (): string => {
+  const nonce = generateNonce()
+  nonces.set(nonce, Date.now() + NONCE_TTL_MS)
+  return nonce
+}
+
+export const consumeNonce = (nonce: string): boolean => {
+  const expiresAt = nonces.get(nonce)
+  if (expiresAt === undefined) return false
+  nonces.delete(nonce)
+  return Date.now() <= expiresAt
+}
 
 export const createSession = (address: string): { id: string; session: Session } => {
   const id = crypto.randomUUID()
