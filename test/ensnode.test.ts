@@ -110,6 +110,42 @@ describe('getDomainsByOwner', () => {
     expect(query).toContain('or:')
   })
 
+  test('drops manager-only matches whose effective owner is someone else', async () => {
+    // The OR filter pulled this domain in via `ownerId`, but the registrant
+    // (NFT holder) is a different address — it doesn't belong in the queried
+    // wallet's portfolio.
+    installFetch(() =>
+      ok({
+        domains: [
+          {
+            id: '0xabc',
+            name: 'someone-elses.eth',
+            labelName: 'someone-elses',
+            owner: { id: '0xa11ce0000000000000000000000000000000a11c' }, // queried wallet (manager)
+            wrappedOwner: null,
+            registrant: { id: '0xb0b00000000000000000000000000000000000b0' }, // actual NFT holder
+            expiryDate: '1900000000',
+            createdAt: '1500000000',
+            registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+          },
+          {
+            id: '0xdef',
+            name: 'mine.eth',
+            labelName: 'mine',
+            owner: { id: '0xa11ce0000000000000000000000000000000a11c' },
+            wrappedOwner: null,
+            registrant: { id: '0xa11ce0000000000000000000000000000000a11c' }, // also the NFT holder
+            expiryDate: '1900000000',
+            createdAt: '1500000000',
+            registration: { registrationDate: '1500000000', expiryDate: '1900000000' },
+          },
+        ],
+      }),
+    )
+    const result = await getDomainsByOwner('0xA11ce0000000000000000000000000000000a11c', 50, 0)
+    expect(result.map((d) => d.name)).toEqual(['mine.eth'])
+  })
+
   test('returns wrapped names with the user as effective owner via shape', async () => {
     // ENSNode emits owner = NameWrapper, wrappedOwner = the user
     installFetch(() =>

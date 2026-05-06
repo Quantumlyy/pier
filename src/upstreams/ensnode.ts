@@ -1,5 +1,6 @@
 import { env } from '../env.ts'
 import { ensCache } from '../lib/cache.ts'
+import { effectiveOwner } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 
 // namehash('eth') — every BaseRegistrar second-level name has this as its
@@ -173,13 +174,19 @@ query GetDomainsByOwner($owner: String!, $parentId: String!, $first: Int!, $skip
 
 export const getDomainsByOwner = (owner: string, first: number, skip: number) =>
   cached('getDomainsByOwner', { owner, first, skip }, async () => {
+    const lc = owner.toLowerCase()
     const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAINS_BY_OWNER, {
-      owner: owner.toLowerCase(),
+      owner: lc,
       parentId: ETH_NODE,
       first,
       skip,
     })
-    return filterDisplayable(data.domains)
+    // The OR includes `ownerId` to catch domains with no Registration entity,
+    // but for normal .eth 2LDs that match also pulls in names where the
+    // queried address is just the registry manager / delegate. Keep only
+    // results whose effective owner (wrappedOwner > registrant > owner) is
+    // the queried address — anything else belongs in someone else's portfolio.
+    return filterDisplayable(data.domains).filter((d) => effectiveOwner(d) === lc)
   })
 
 const GET_EXPIRY_DATES = `${DOMAIN_FRAGMENT}

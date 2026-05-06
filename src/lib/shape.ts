@@ -32,7 +32,7 @@ const pickExpiry = (d: ENSNodeDomain): number | null =>
 //  - everything else: `owner` as a last resort.
 // Frontend ownership checks compare against this field, so prefer the most
 // authoritative source.
-const effectiveOwner = (d: ENSNodeDomain): string | null => {
+export const effectiveOwner = (d: ENSNodeDomain): string | null => {
   const wrapped = d.wrappedOwner?.id
   if (wrapped) return wrapped.toLowerCase()
   const registrant = d.registrant?.id
