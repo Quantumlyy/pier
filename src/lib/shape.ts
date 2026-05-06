@@ -25,6 +25,30 @@ const parseUnixSeconds = (raw: string | null | undefined): number | null => {
 const pickExpiry = (d: ENSNodeDomain): number | null =>
   parseUnixSeconds(d.registration?.expiryDate ?? null) ?? parseUnixSeconds(d.expiryDate)
 
+// Lifecycle bucket the frontend's status_type / RollStatus filters care
+// about. Boundaries match jetty's StatusTypeEnum: 90-day grace, then a
+// 21-day premium Dutch-auction phase, then a 30-day "new" buffer, then
+// long-released. All thresholds are based on Registration.expiryDate
+// (the actual registrar expiry, before the grace window) which we
+// canonicalise via pickExpiry.
+export type DomainStatus = 'registered' | 'grace' | 'premium' | 'new' | 'previously_owned'
+
+const SECONDS_PER_DAY = 86_400
+
+export const domainStatus = (
+  d: ENSNodeDomain,
+  now: number = Math.floor(Date.now() / 1000),
+): DomainStatus => {
+  const expiry = pickExpiry(d)
+  if (expiry == null) return 'previously_owned'
+  if (expiry > now) return 'registered'
+  const age = now - expiry
+  if (age < 90 * SECONDS_PER_DAY) return 'grace'
+  if (age < 111 * SECONDS_PER_DAY) return 'premium'
+  if (age < 141 * SECONDS_PER_DAY) return 'new'
+  return 'previously_owned'
+}
+
 // Pick the address with BaseRegistrar ownership semantics:
 //  - wrapped names: `wrappedOwner` (the user; `owner` is the NameWrapper).
 //  - unwrapped names: `registrant` (the NFT holder; `owner` is the registry

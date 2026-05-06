@@ -176,6 +176,36 @@ describe('toMarketplaceDomain', () => {
   })
 })
 
+describe('domainStatus', () => {
+  // We import here so we don't disturb the existing import block ordering.
+  const { domainStatus } = require('../src/lib/shape.ts') as typeof import('../src/lib/shape.ts')
+  const NOW = 1_700_000_000
+
+  test('registered when registrar expiry is in the future', () => {
+    expect(domainStatus(baseDomain({ registration: { registrationDate: '0', expiryDate: String(NOW + 86400) } }), NOW)).toBe('registered')
+  })
+
+  test('grace within the first 90 days after expiry', () => {
+    expect(domainStatus(baseDomain({ registration: { registrationDate: '0', expiryDate: String(NOW - 30 * 86400) } }), NOW)).toBe('grace')
+  })
+
+  test('premium between 90 and 111 days past expiry', () => {
+    expect(domainStatus(baseDomain({ registration: { registrationDate: '0', expiryDate: String(NOW - 100 * 86400) } }), NOW)).toBe('premium')
+  })
+
+  test('new between 111 and 141 days past expiry', () => {
+    expect(domainStatus(baseDomain({ registration: { registrationDate: '0', expiryDate: String(NOW - 130 * 86400) } }), NOW)).toBe('new')
+  })
+
+  test('previously_owned beyond 141 days past expiry', () => {
+    expect(domainStatus(baseDomain({ registration: { registrationDate: '0', expiryDate: String(NOW - 200 * 86400) } }), NOW)).toBe('previously_owned')
+  })
+
+  test('previously_owned when no expiry data', () => {
+    expect(domainStatus(baseDomain({ registration: null, expiryDate: null }), NOW)).toBe('previously_owned')
+  })
+})
+
 describe('toExpiresEntry', () => {
   test('uses the registrar expiry when present', () => {
     expect(toExpiresEntry('vitalik.eth', baseDomain())).toEqual({

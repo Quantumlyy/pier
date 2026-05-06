@@ -287,6 +287,30 @@ describe('GET /search/plain', () => {
     expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
   })
 
+  test('honors status_type=premium', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    const dayAgo = (n: number) => String(now - n * 86_400)
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            // registered (a year out): excluded
+            ensDomain('alive.eth', { registration: { registrationDate: '0', expiryDate: String(now + 365 * 86_400) } }),
+            // 100 days past expiry: premium → kept
+            ensDomain('premiumish.eth', { registration: { registrationDate: '0', expiryDate: dayAgo(100) } }),
+            // 200 days past: previously_owned → excluded
+            ensDomain('long-gone.eth', { registration: { registrationDate: '0', expiryDate: dayAgo(200) } }),
+          ],
+        })
+      }
+      return gqlOk({ domains: [] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=z&limit=10&status_type=premium'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual(['premiumish.eth'])
+  })
+
   test('honors min_domain_length / max_domain_length post-filter', async () => {
     installFetch(({ body }) => {
       if (body?.variables.prefix !== undefined) {

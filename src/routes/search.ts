@@ -1,7 +1,7 @@
 import { Elysia } from 'elysia'
 
 import { TDomainsResponse, TRollQuery, TSearchQuery } from '../lib/schemas.ts'
-import { toMarketplaceDomain } from '../lib/shape.ts'
+import { type DomainStatus, domainStatus, toMarketplaceDomain } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 import {
   browseRecent,
@@ -41,6 +41,14 @@ type SearchFilters = {
   minLength: number | undefined
   maxLength: number | undefined
   symbolTypes: Set<'letters' | 'numbers' | 'emojis'>
+  status: DomainStatus | undefined
+}
+
+const STATUS_TYPE_MAP: Record<string, DomainStatus> = {
+  new: 'new',
+  premium: 'premium',
+  previously_owned: 'previously_owned',
+  grace: 'grace',
 }
 
 const parseFilters = (q: Record<string, string | undefined>): SearchFilters => {
@@ -54,10 +62,12 @@ const parseFilters = (q: Record<string, string | undefined>): SearchFilters => {
     const t = tok.trim()
     if (t === 'letters' || t === 'numbers' || t === 'emojis') symbolTypes.add(t)
   }
+  const status = STATUS_TYPE_MAP[(q.status_type ?? '').toLowerCase()]
   return {
     minLength: parseLen(q.min_domain_length),
     maxLength: parseLen(q.max_domain_length),
     symbolTypes,
+    status,
   }
 }
 
@@ -91,11 +101,15 @@ const passesFilters = (d: ENSNodeDomain, f: SearchFilters): boolean => {
   if (f.minLength !== undefined && len < f.minLength) return false
   if (f.maxLength !== undefined && len > f.maxLength) return false
   if (!symbolMatches(label, f.symbolTypes)) return false
+  if (f.status !== undefined && domainStatus(d) !== f.status) return false
   return true
 }
 
 const filtersActive = (f: SearchFilters): boolean =>
-  f.minLength !== undefined || f.maxLength !== undefined || f.symbolTypes.size > 0
+  f.minLength !== undefined ||
+  f.maxLength !== undefined ||
+  f.symbolTypes.size > 0 ||
+  f.status !== undefined
 
 const applyFilters = (domains: ENSNodeDomain[], f: SearchFilters): ENSNodeDomain[] => {
   if (!filtersActive(f)) return domains
