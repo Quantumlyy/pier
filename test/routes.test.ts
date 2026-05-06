@@ -203,12 +203,15 @@ describe('GET /authenticate', () => {
 })
 
 describe('GET /search/plain', () => {
-  test('empty query returns empty array without hitting upstream', async () => {
-    const { calls } = installFetch(() => gqlOk({ domains: [] }))
-    const r = await json<{ domains: unknown[] }>(req.get('/search/plain'))
+  test('empty query returns a default-browse page (recent registrations)', async () => {
+    const { calls } = installFetch(() => gqlOk({ domains: [ensDomain('recent.eth')] }))
+    const r = await json<{ domains: { name: string }[] }>(req.get('/search/plain'))
     expect(r.status).toBe(200)
-    expect(r.body.domains).toEqual([])
-    expect(calls).toHaveLength(0)
+    expect(r.body.domains).toHaveLength(1)
+    expect(r.body.domains[0]?.name).toBe('recent.eth')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.body?.query).toContain('orderBy: createdAt')
+    expect(calls[0]?.body?.query).toContain('orderDirection: desc')
   })
 
   test('passes prefix to ENSNode and shapes results', async () => {

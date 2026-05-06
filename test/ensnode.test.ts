@@ -165,6 +165,21 @@ describe('getDomainByName', () => {
   })
 })
 
+describe('browseRecent', () => {
+  test('uses no name filter and orders by createdAt desc', async () => {
+    const { browseRecent } = await import('../src/upstreams/ensnode.ts')
+    const { calls } = installFetch(() => ok({ domains: [domain('recent.eth')] }))
+    const result = await browseRecent(10, 0)
+    expect(result).toHaveLength(1)
+    const query = calls[0]?.body?.query ?? ''
+    expect(query).toContain('orderBy: createdAt')
+    expect(query).toContain('orderDirection: desc')
+    expect(query).not.toContain('name_starts_with')
+    expect(query).not.toContain('name_contains')
+    expect(calls[0]?.body?.variables).toMatchObject({ first: 10, skip: 0 })
+  })
+})
+
 describe('eth-parent + displayability filter', () => {
   test('search/owner queries pass parentId = namehash("eth")', async () => {
     const { calls } = installFetch(() => ok({ domains: [] }))

@@ -102,6 +102,30 @@ export const searchByPrefix = (prefix: string, first: number, skip: number) =>
     return filterDisplayable(data.domains)
   })
 
+// Default-browse query: no name filter, ordered by createdAt desc so the
+// frontend's "open the marketplace with no search term" view renders recent
+// registrations instead of an empty page.
+const BROWSE_RECENT = `${DOMAIN_FRAGMENT}
+query BrowseRecent($parentId: String!, $first: Int!, $skip: Int!) {
+  domains(
+    where: { parentId: $parentId }
+    orderBy: createdAt
+    orderDirection: desc
+    first: $first
+    skip: $skip
+  ) { ...DomainFields }
+}`
+
+export const browseRecent = (first: number, skip: number) =>
+  cached('browseRecent', { first, skip }, async () => {
+    const data = await gql<{ domains: ENSNodeDomain[] }>(BROWSE_RECENT, {
+      parentId: ETH_NODE,
+      first,
+      skip,
+    })
+    return filterDisplayable(data.domains)
+  })
+
 const SEARCH_BY_CONTAINS = `${DOMAIN_FRAGMENT}
 query SearchByContains($needle: String!, $parentId: String!, $first: Int!, $skip: Int!) {
   domains(

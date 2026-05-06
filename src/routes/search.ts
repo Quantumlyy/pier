@@ -2,7 +2,12 @@ import { Elysia } from 'elysia'
 
 import { TDomainsResponse, TRollQuery, TSearchQuery } from '../lib/schemas.ts'
 import { toMarketplaceDomain } from '../lib/shape.ts'
-import { getExpiryDates, searchByContains, searchByPrefix } from '../upstreams/ensnode.ts'
+import {
+  browseRecent,
+  getExpiryDates,
+  searchByContains,
+  searchByPrefix,
+} from '../upstreams/ensnode.ts'
 
 const ROLL_POOL = [
   'vitalik.eth', 'nick.eth', 'brantly.eth', 'sassal.eth', 'cory.eth',
@@ -29,14 +34,17 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
     async ({ query }) => {
       const name = normalizeName(query.name)
       const { limit, offset } = parsePagination(query.limit, query.offset)
-      if (!name) return { domains: [] }
-      const domains = await searchByPrefix(name, limit, offset)
+      // Empty name = the frontend's default marketplace / filter-only browse;
+      // return a recent-first page rather than nothing.
+      const domains = name
+        ? await searchByPrefix(name, limit, offset)
+        : await browseRecent(limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
       query: TSearchQuery,
       response: TDomainsResponse,
-      detail: { summary: 'Prefix-match domain search via ENSNode' },
+      detail: { summary: 'Prefix-match search; empty name returns recent registrations' },
     },
   )
   .get(
@@ -45,8 +53,9 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       // MVP: substring match instead of real semantic similarity (embedding service is dead)
       const name = normalizeName(query.name)
       const { limit, offset } = parsePagination(query.limit, query.offset)
-      if (!name) return { domains: [] }
-      const domains = await searchByContains(name, limit, offset)
+      const domains = name
+        ? await searchByContains(name, limit, offset)
+        : await browseRecent(limit, offset)
       return { domains: domains.map(toMarketplaceDomain) }
     },
     {
