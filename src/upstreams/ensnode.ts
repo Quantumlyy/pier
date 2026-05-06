@@ -1,6 +1,6 @@
 import { env } from '../env.ts'
 import { ensCache } from '../lib/cache.ts'
-import { effectiveOwner } from '../lib/shape.ts'
+import { type DomainStatus, effectiveOwner } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 
 // Returned by the page-style helpers used by the search walker.
@@ -112,6 +112,88 @@ export const searchByPrefix = (prefix: string, first: number, skip: number): Pro
     })
     return { domains: filterDisplayable(data.domains), raw: data.domains.length }
   }) as Promise<EnsPage>
+
+// Domain.expiryDate offsets relative to `now` (in seconds) for each
+// lifecycle bucket. ENSNode lets us filter by Domain.expiryDate but not by
+// Registration.expiryDate (no `registration_:` nested filter), so for
+// unwrapped names where Domain.expiryDate = registration.expiryDate + 90d
+// these match the boundaries used by domainStatus(). For wrapped names the
+// upstream filter is approximate; the walker's post-filter (domainStatus)
+// fixes any disagreement, but the upstream narrowing is still vastly more
+// useful than browseRecent for empty-name + status_type searches.
+const STATUS_EXPIRY_DELTAS: Record<DomainStatus, { gt?: number; lt?: number }> = {
+  registered: { gt: 90 * 86_400 },
+  grace: { gt: 0, lt: 90 * 86_400 },
+  premium: { gt: -21 * 86_400, lt: 0 },
+  new: { gt: -51 * 86_400, lt: -21 * 86_400 },
+  previously_owned: { lt: -51 * 86_400 },
+}
+
+// Compute the union of the lifecycle intervals as a single contiguous
+// range. All our user-facing status mappings (status_type=premium,
+// status_type=previously_owned → ['previously_owned', 'new'], …) produce
+// adjacent intervals, so the union is exact. ENSNode's `or:` filter is
+// broken for range conditions in 2026 (verified empirically), so we can't
+// fan out — anyone introducing a non-contiguous mapping needs to fall
+// back to multi-query merging.
+export const expiryRangeFor = (
+  statuses: DomainStatus[],
+): { gt?: number; lt?: number } => {
+  let lo = Infinity
+  let hi = -Infinity
+  let lowerInf = false
+  let upperInf = false
+  for (const s of statuses) {
+    const r = STATUS_EXPIRY_DELTAS[s]
+    if (r.gt === undefined) lowerInf = true
+    else if (r.gt < lo) lo = r.gt
+    if (r.lt === undefined) upperInf = true
+    else if (r.lt > hi) hi = r.lt
+  }
+  return {
+    gt: lowerInf || lo === Infinity ? undefined : lo,
+    lt: upperInf || hi === -Infinity ? undefined : hi,
+  }
+}
+
+// Round `now` to a 30-second bucket so successive page requests for the
+// same status share a cache key — matches the ensCache TTL.
+const bucketedNow = (): number => Math.floor(Date.now() / 30_000) * 30
+
+const BROWSE_BY_EXPIRY = `${DOMAIN_FRAGMENT}
+query BrowseByExpiry($where: Domain_filter!, $first: Int!, $skip: Int!) {
+  domains(
+    where: $where
+    orderBy: expiryDate
+    orderDirection: desc
+    first: $first
+    skip: $skip
+  ) { ...DomainFields }
+}`
+
+export const browseByStatus = (
+  statuses: DomainStatus[],
+  first: number,
+  skip: number,
+): Promise<EnsPage> => {
+  const now = bucketedNow()
+  const delta = expiryRangeFor(statuses)
+  const range = {
+    gt: delta.gt !== undefined ? now + delta.gt : undefined,
+    lt: delta.lt !== undefined ? now + delta.lt : undefined,
+  }
+  return cached('browseByStatus', { range, first, skip }, async () => {
+    const where: Record<string, unknown> = { parentId: ETH_NODE }
+    if (range.gt !== undefined) where.expiryDate_gt = range.gt
+    if (range.lt !== undefined) where.expiryDate_lt = range.lt
+    const data = await gql<{ domains: ENSNodeDomain[] }>(BROWSE_BY_EXPIRY, {
+      where,
+      first,
+      skip,
+    })
+    return { domains: filterDisplayable(data.domains), raw: data.domains.length }
+  }) as Promise<EnsPage>
+}
 
 // Default-browse query: no name filter, ordered by createdAt desc so the
 // frontend's "open the marketplace with no search term" view renders recent

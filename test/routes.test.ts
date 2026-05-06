@@ -313,6 +313,33 @@ describe('GET /search/plain', () => {
     )
   })
 
+  test('empty-name + status_type routes through browseByStatus, not browseRecent', async () => {
+    // Look at the GraphQL query string that hits the upstream — the
+    // browseByStatus path uses `orderBy: expiryDate` while browseRecent
+    // uses `orderBy: createdAt`. The former is the only path that can
+    // surface premium / grace / unregistered names within a few rows.
+    const { calls } = installFetch(({ body }) => {
+      if ((body?.query ?? '').includes('orderBy: expiryDate')) {
+        const now = Math.floor(Date.now() / 1000)
+        return gqlOk({
+          domains: [
+            ensDomain('premiumish.eth', {
+              registration: { registrationDate: '0', expiryDate: String(now - 100 * 86_400) },
+            }),
+          ],
+        })
+      }
+      return gqlOk({ domains: [] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?limit=10&status_type=premium'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual(['premiumish.eth'])
+    const upstreamQueries = calls.map((c) => c.body?.query ?? '')
+    expect(upstreamQueries.some((q) => q.includes('orderBy: expiryDate'))).toBe(true)
+    expect(upstreamQueries.every((q) => !q.includes('orderBy: createdAt'))).toBe(true)
+  })
+
   test('honors status_type=premium', async () => {
     const now = Math.floor(Date.now() / 1000)
     const dayAgo = (n: number) => String(now - n * 86_400)

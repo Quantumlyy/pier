@@ -4,6 +4,7 @@ import { TDomainsResponse, TRollQuery, TSearchQuery } from '../lib/schemas.ts'
 import { type DomainStatus, domainStatus, toMarketplaceDomain } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 import {
+  browseByStatus,
   browseRecent,
   type EnsPage,
   getDomainByName,
@@ -189,7 +190,9 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       const filters = parseFilters(query)
       const fetcher = name
         ? (skip: number) => searchByPrefix(name, WALK_PAGE, skip)
-        : (skip: number) => browseRecent(WALK_PAGE, skip)
+        : filters.status
+          ? (skip: number) => browseByStatus(filters.status!, WALK_PAGE, skip)
+          : (skip: number) => browseRecent(WALK_PAGE, skip)
       // +1 reserves a slot for the exact match we may prepend at logical
       // position 0; composePage trims it back to `limit`.
       const target = offset + limit + (name ? 1 : 0)
@@ -215,7 +218,9 @@ export const searchRoutes = new Elysia({ tags: ['search'] })
       const filters = parseFilters(query)
       const fetcher = name
         ? (skip: number) => searchByContains(name, WALK_PAGE, skip)
-        : (skip: number) => browseRecent(WALK_PAGE, skip)
+        : filters.status
+          ? (skip: number) => browseByStatus(filters.status!, WALK_PAGE, skip)
+          : (skip: number) => browseRecent(WALK_PAGE, skip)
       const target = offset + limit + (name ? 1 : 0)
       const walked = await walkAndFilter(fetcher, filters, target)
       const domains = await composePage(walked, name ? `${name}.eth` : null, filters, limit, offset)

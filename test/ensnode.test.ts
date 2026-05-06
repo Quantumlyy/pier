@@ -319,6 +319,46 @@ describe('getDomainByName', () => {
   })
 })
 
+describe('expiryRangeFor', () => {
+  test('single status produces an inline range', async () => {
+    const { expiryRangeFor } = await import('../src/upstreams/ensnode.ts')
+    const r = expiryRangeFor(['premium'])
+    expect(r.gt).toBe(-21 * 86_400)
+    expect(r.lt).toBe(0)
+  })
+
+  test('open-ended status (registered) drops the upper bound', async () => {
+    const { expiryRangeFor } = await import('../src/upstreams/ensnode.ts')
+    const r = expiryRangeFor(['registered'])
+    expect(r.gt).toBe(90 * 86_400)
+    expect(r.lt).toBeUndefined()
+  })
+
+  test('previously_owned + new union to a single open-bottom range', async () => {
+    const { expiryRangeFor } = await import('../src/upstreams/ensnode.ts')
+    const r = expiryRangeFor(['previously_owned', 'new'])
+    expect(r.gt).toBeUndefined()
+    expect(r.lt).toBe(-21 * 86_400)
+  })
+})
+
+describe('browseByStatus', () => {
+  test('queries by an expiryDate range derived from the requested statuses', async () => {
+    const { browseByStatus } = await import('../src/upstreams/ensnode.ts')
+    const { calls } = installFetch(() => ok({ domains: [domain('premium-name.eth')] }))
+    await browseByStatus(['premium'], 10, 0)
+    const vars = calls[0]?.body?.variables as { where: Record<string, unknown> }
+    expect(vars.where.parentId).toMatch(/^0x[0-9a-f]{64}$/)
+    expect(typeof vars.where.expiryDate_gt).toBe('number')
+    expect(typeof vars.where.expiryDate_lt).toBe('number')
+    // gt < lt; lt should be at most "now" (premium upper bound).
+    expect(Number(vars.where.expiryDate_gt)).toBeLessThan(Number(vars.where.expiryDate_lt))
+    const query = calls[0]?.body?.query ?? ''
+    expect(query).toContain('orderBy: expiryDate')
+    expect(query).toContain('orderDirection: desc')
+  })
+})
+
 describe('browseRecent', () => {
   test('uses no name filter and orders by createdAt desc', async () => {
     const { browseRecent } = await import('../src/upstreams/ensnode.ts')
