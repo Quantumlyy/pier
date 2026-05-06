@@ -12,13 +12,28 @@ cp .env.example .env       # optional — defaults work for local dev
 bun --hot src/index.ts     # listens on :8000
 ```
 
-Then point the frontend at it:
+Then point the frontend at it. **Setting `NEXT_PUBLIC_JETTY_URL` alone is not enough** — only the RainbowKit SIWE adapter reads `config.jettyBaseUrl` from that env var (in `app/lib/core/siweAuthentication.ts`). Every other fetcher (`fetchMarketplaceDomains`, `fetchUserDomains`, `fetchDomainExpiryDate`, the cart/like mutations, …) imports a hardcoded `JETTY_URL` from `app/constants/api/index.ts`:
+
+```ts
+export const JETTY_URL = 'https://jetty.kodex.io'
+```
+
+Patch that one line to read from the env so the data fetchers also hit pier:
+
+```diff
+-export const JETTY_URL = 'https://jetty.kodex.io'
++export const JETTY_URL = process.env.NEXT_PUBLIC_JETTY_URL || 'https://jetty.kodex.io'
+```
+
+Then run the frontend:
 
 ```bash
-# in kodex-interface
+# in kodex-interface, after the patch above
 echo 'NEXT_PUBLIC_JETTY_URL=http://localhost:8000' >> .env.local
 bun dev                    # runs on :3071
 ```
+
+If you'd rather not edit kodex-interface (the project's no-modify-frontend rule applies in spirit to pier itself, not to your local dev tree), the alternative is a hosts-file redirect of `jetty.kodex.io` to `127.0.0.1` plus a local TLS proxy in front of pier — more setup, no source edits.
 
 `http://localhost:3071` should boot. Search returns real ENS names, domain detail pages show real owners and expiry dates, SIWE login works, and the portfolio page lists names you actually own. Marketplace buy/sell flows depend on the Reservoir SDK and remain broken — that's expected.
 
