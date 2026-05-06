@@ -44,8 +44,22 @@ export const buildApp = () =>
         },
       }),
     )
-    .onError(({ error, code }) => {
+    .onError(({ error, code, set }) => {
       if (code === 'NOT_FOUND') return { error: 'not found' }
+      if (code === 'VALIDATION') {
+        // 4xx client error: the schema rejected the request. Don't log
+        // (these aren't pier bugs) and don't echo the offending body —
+        // Elysia's default message includes it. Surface just the field
+        // path + reason so the client can fix the call.
+        set.status = 422
+        const e = error as {
+          type?: string
+          valueError?: { path?: string; message?: string }
+        }
+        const where = e.type ? `${e.type}${e.valueError?.path ?? ''}` : 'request'
+        const why = e.valueError?.message ?? 'validation failed'
+        return { error: `invalid ${where}: ${why}` }
+      }
       console.error('[pier] unhandled error:', error)
       return { error: error instanceof Error ? error.message : 'internal error' }
     })

@@ -129,9 +129,29 @@ describe('GET /nonce', () => {
 })
 
 describe('POST /verify', () => {
-  test('rejects malformed body shape', async () => {
-    const r = await json(req.post('/verify', { wrong: 'shape' }))
-    expect(r.status).toBe(422) // Elysia body validation rejects with 422 when schema is set
+  test('rejects malformed body shape with a concise 422 (no body echo)', async () => {
+    // Capture stderr to assert the validation error isn't logged as an
+    // unhandled server error.
+    const original = console.error
+    const logs: unknown[] = []
+    console.error = (...a: unknown[]) => {
+      logs.push(a)
+    }
+    try {
+      const r = await json<{ error: string }>(req.post('/verify', { wrong: 'shape' }))
+      expect(r.status).toBe(422)
+      expect(typeof r.body.error).toBe('string')
+      expect(r.body.error.startsWith('invalid body')).toBe(true)
+      // Concise — no field-by-field dump and no request-body echo.
+      expect(r.body.error).not.toContain('wrong')
+      expect(r.body.error.length).toBeLessThan(200)
+    } finally {
+      console.error = original
+    }
+    const unhandled = logs.find(
+      (l) => Array.isArray(l) && typeof l[0] === 'string' && l[0].includes('[pier] unhandled'),
+    )
+    expect(unhandled).toBeUndefined()
   })
 
   test('rejects bogus SIWE message string', async () => {
