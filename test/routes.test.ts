@@ -269,6 +269,49 @@ describe('GET /search/plain', () => {
     expect(r.body.domains.map((d) => d.name)).toEqual(['vital.eth', 'vital-foo.eth'])
   })
 
+  test('honors min_domain_length / max_domain_length post-filter', async () => {
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            ensDomain('ab.eth', { labelName: 'ab' }),
+            ensDomain('abc.eth', { labelName: 'abc' }),
+            ensDomain('abcd.eth', { labelName: 'abcd' }),
+            ensDomain('abcde.eth', { labelName: 'abcde' }),
+          ],
+        })
+      }
+      return gqlOk({ domains: [] }) // no exact for "ab"
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=ab&limit=10&min_domain_length=3&max_domain_length=3'),
+    )
+    expect(r.body.domains.map((d) => d.name)).toEqual(['abc.eth'])
+  })
+
+  test('honors name_symbols_type=numbers', async () => {
+    installFetch(({ body }) => {
+      if (body?.variables.prefix !== undefined) {
+        return gqlOk({
+          domains: [
+            ensDomain('123.eth', { labelName: '123' }),
+            ensDomain('hello.eth', { labelName: 'hello' }),
+            ensDomain('mix1.eth', { labelName: 'mix1' }),
+          ],
+        })
+      }
+      return gqlOk({ domains: [] })
+    })
+    const r = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=&limit=10&name_symbols_type=numbers'),
+    )
+    // Empty name uses browseRecent, not prefix; let's hit prefix instead.
+    const r2 = await json<{ domains: { name: string }[] }>(
+      req.get('/search/plain?name=z&limit=10&name_symbols_type=numbers'),
+    )
+    expect(r2.body.domains.map((d) => d.name)).toEqual(['123.eth'])
+  })
+
   test('does not fetch the exact match for offset > 0', async () => {
     const { calls } = installFetch(() => gqlOk({ domains: [] }))
     await json(req.get('/search/plain?name=vital&limit=10&offset=10'))
