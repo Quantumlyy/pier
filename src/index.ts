@@ -1,4 +1,5 @@
 import { cors } from '@elysiajs/cors'
+import { openapi } from '@elysiajs/openapi'
 import { Elysia } from 'elysia'
 
 import { env } from './env.ts'
@@ -21,6 +22,28 @@ export const buildApp = () =>
         maxAge: 600,
       }),
     )
+    .use(
+      openapi({
+        path: '/docs',
+        documentation: {
+          info: {
+            title: 'pier',
+            version: '0.1.0',
+            description:
+              'A Bun + Elysia drop-in for the dead jetty backend. ENS data comes from ENSNode; Reservoir-shaped routes return empty/zero responses.',
+          },
+          tags: [
+            { name: 'health', description: 'Liveness probes' },
+            { name: 'auth', description: 'SIWE nonce / verify / session check' },
+            { name: 'search', description: 'Domain search backed by ENSNode' },
+            { name: 'domain', description: 'Per-domain metadata' },
+            { name: 'user', description: 'Owned domains, likes, cart' },
+            { name: 'stats', description: 'Marketplace stats (stubbed)' },
+            { name: 'feed', description: 'Activity feeds (stubbed)' },
+          ],
+        },
+      }),
+    )
     .onError(({ error, code }) => {
       if (code === 'NOT_FOUND') return { error: 'not found' }
       console.error('[pier] unhandled error:', error)
@@ -36,5 +59,8 @@ export const buildApp = () =>
 
 if (import.meta.main) {
   const app = buildApp().listen(env.PORT)
-  console.log(`pier listening on http://localhost:${app.server?.port ?? env.PORT}`)
+  const port = app.server?.port ?? env.PORT
+  console.log(`pier listening on http://localhost:${port}`)
+  console.log(`docs:  http://localhost:${port}/docs`)
+  console.log(`spec:  http://localhost:${port}/docs/json`)
 }
