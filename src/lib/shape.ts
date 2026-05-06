@@ -25,12 +25,18 @@ const parseUnixSeconds = (raw: string | null | undefined): number | null => {
 const pickExpiry = (d: ENSNodeDomain): number | null =>
   parseUnixSeconds(d.registration?.expiryDate ?? null) ?? parseUnixSeconds(d.expiryDate)
 
-// For wrapped names ENSNode reports `owner` as the NameWrapper contract and
-// `wrappedOwner` as the user's address; for unwrapped names `wrappedOwner` is
-// null. Always prefer the latter when present.
+// Pick the address with BaseRegistrar ownership semantics:
+//  - wrapped names: `wrappedOwner` (the user; `owner` is the NameWrapper).
+//  - unwrapped names: `registrant` (the NFT holder; `owner` is the registry
+//    manager and may be a delegated address).
+//  - everything else: `owner` as a last resort.
+// Frontend ownership checks compare against this field, so prefer the most
+// authoritative source.
 const effectiveOwner = (d: ENSNodeDomain): string | null => {
   const wrapped = d.wrappedOwner?.id
   if (wrapped) return wrapped.toLowerCase()
+  const registrant = d.registrant?.id
+  if (registrant) return registrant.toLowerCase()
   const owner = d.owner?.id
   return owner ? owner.toLowerCase() : null
 }

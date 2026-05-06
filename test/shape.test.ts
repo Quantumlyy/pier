@@ -27,7 +27,7 @@ describe('toMarketplaceDomain', () => {
       name: 'vitalik.eth',
       name_ens: 'vitalik',
       expire_time: 2461152330,
-      owner: '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+      owner: '0x220866b1a2219f40e72f5c628b65d54268ca3a9d',
       terms: [],
       taxonomies: [],
       last_price: null,
@@ -43,35 +43,50 @@ describe('toMarketplaceDomain', () => {
     })
   })
 
-  test('lowercases owner address', () => {
-    const result = toMarketplaceDomain(baseDomain())
-    expect(result.owner).toBe('0xd8da6bf26964af9d7eed9e03e53415d37aa96045')
+  test('lowercases the effective owner address', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({ registrant: { id: '0x220866B1A2219F40E72F5C628B65D54268CA3A9D' } }),
+    )
+    expect(result.owner).toBe('0x220866b1a2219f40e72f5c628b65d54268ca3a9d')
   })
 
-  test('null owner stays null', () => {
-    const result = toMarketplaceDomain(baseDomain({ owner: null }))
-    expect(result.owner).toBeNull()
+  test('owner falls to null when every source is missing', () => {
+    expect(
+      toMarketplaceDomain(baseDomain({ owner: null, registrant: null, wrappedOwner: null })).owner,
+    ).toBeNull()
   })
 
-  test('prefers wrappedOwner over registry owner for wrapped names', () => {
+  test('wrappedOwner wins over both registrant and registry owner', () => {
     const result = toMarketplaceDomain(
       baseDomain({
         owner: { id: '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401' }, // NameWrapper
+        registrant: { id: '0x1111111111111111111111111111111111111111' },
         wrappedOwner: { id: '0x35396D0DBfFD9D4Eb1aFE1eA7c7DC76dA2F8e5E1' },
       }),
     )
     expect(result.owner).toBe('0x35396d0dbffd9d4eb1afe1ea7c7dc76da2f8e5e1')
   })
 
-  test('falls back to registry owner when wrappedOwner is null/missing', () => {
-    expect(
-      toMarketplaceDomain(baseDomain({ wrappedOwner: null })).owner,
-    ).toBe('0xd8da6bf26964af9d7eed9e03e53415d37aa96045')
-    const noWrapField = baseDomain()
-    delete (noWrapField as Partial<typeof noWrapField>).wrappedOwner
-    expect(toMarketplaceDomain(noWrapField).owner).toBe(
-      '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+  test('registrant wins over registry owner for unwrapped delegated names', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({
+        owner: { id: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },        // delegated manager
+        registrant: { id: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },   // NFT holder
+        wrappedOwner: null,
+      }),
     )
+    expect(result.owner).toBe('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+  })
+
+  test('owner is used only as a last resort', () => {
+    const result = toMarketplaceDomain(
+      baseDomain({
+        owner: { id: '0xcccccccccccccccccccccccccccccccccccccccc' },
+        registrant: null,
+        wrappedOwner: null,
+      }),
+    )
+    expect(result.owner).toBe('0xcccccccccccccccccccccccccccccccccccccccc')
   })
 
   test('derives the label from the full name when labelName is missing', () => {
