@@ -46,10 +46,10 @@ A multi-stage Dockerfile (per [Elysia's deploy guide](https://elysiajs.com/patte
 ```bash
 docker build -t pier .
 docker run --rm -p 8000:8000 pier
-# or override env: -e ENSNODE_URL=... -e ALLOWED_ORIGINS=https://my.frontend
+# or override env: -e ENSNODE_URL=... -e GRAILS_ANALYTICS_BASE=... -e ALLOWED_ORIGINS=https://my.frontend
 ```
 
-`PORT`, `ENSNODE_URL`, `ALLOWED_ORIGINS`, `SESSION_TTL_MS`, and `NODE_ENV` are all picked up from the container env. There's no HEALTHCHECK directive in the Dockerfile — point your orchestrator's HTTP probe at `/health_check`.
+`PORT`, `ENSNODE_URL`, `GRAILS_ANALYTICS_BASE` (optional), `ALLOWED_ORIGINS`, `SESSION_TTL_MS`, and `NODE_ENV` are all picked up from the container env. There's no HEALTHCHECK directive in the Dockerfile — point your orchestrator's HTTP probe at `/health_check`.
 
 ## Environment variables
 
@@ -57,6 +57,7 @@ docker run --rm -p 8000:8000 pier
 |---|---|---|
 | `PORT` | `8000` | HTTP listen port |
 | `ENSNODE_URL` | `https://api.alpha.ensnode.io/subgraph` | upstream GraphQL endpoint |
+| `GRAILS_ANALYTICS_BASE` | _(unset)_ | optional — e.g. `https://api.grails.app/api/v1/analytics` feeds `/total_stats` sales columns from [Grails](https://api.grails.app/api/v1/analytics/market) market + sales APIs |
 | `ALLOWED_ORIGINS` | `http://localhost:3071` | comma-separated CORS allowlist |
 | `SESSION_TTL_MS` | `86400000` (24h) | SIWE session lifetime |
 | `NODE_ENV` | `development` | when `production`, the session cookie is `Secure` |
@@ -77,7 +78,7 @@ Real = backed by ENSNode. Stub = returns the right shape with empty/zero values 
 | GET | `/info/domain/categories` | stub | empty `categories[]` per requested domain |
 | GET | `/domains/owner` | real | ENSNode `where: { owner }` |
 | GET | `/roll` | real | random pick from a hardcoded pool of well-known names |
-| GET | `/total_stats` | stub | all-zero `TotalStatsType` |
+| GET | `/total_stats` | partial | ENSNode + optional Grails; **amounts are integer wei strings** (Kodex UI `formatEtherPrice`) |
 | GET | `/floor_price` | stub | `{ domains: [] }` |
 | GET | `/feed/events` | stub | `{ events: [] }` |
 | GET | `/feed/aggregate` | stub | `{ aggregations: [] }` |
@@ -107,7 +108,7 @@ src/
 │   └── feed.ts           /feed/*
 └── lib/
     ├── shape.ts          ENSNode Domain → MarketplaceDomainType
-    ├── cache.ts          30s/1000-entry TTL+LRU with single-flight dedup
+    ├── cache.ts          `ensCache` 30s/1000-entry TTL+LRU; `statsAggregationCache` 60s for `/total_stats` registration aggregates
     ├── session.ts        in-memory sessions + nonce store (single-use, 5min TTL)
     ├── schemas.ts        TypeBox schemas reused across routes (drives OpenAPI)
     └── types.ts

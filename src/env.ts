@@ -3,6 +3,11 @@ import { z } from 'zod'
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8000),
   ENSNODE_URL: z.string().url().default('https://api.alpha.ensnode.io/subgraph'),
+  GRAILS_ANALYTICS_BASE: z
+    .preprocess(
+      (v) => (v === undefined || v === null || String(v).trim() === '' ? undefined : v),
+      z.string().url().optional(),
+    ),
   ALLOWED_ORIGINS: z
     .string()
     .default('http://localhost:3071')

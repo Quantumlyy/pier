@@ -59,3 +59,6 @@ export class TTLCache<V> {
 }
 
 export const ensCache = new TTLCache<unknown>({ ttlMs: 30_000, max: 1000 })
+
+/** 60s TTL for `/total_stats` registration aggregates (not `ensCache` — 30s would undercut ~1 min caching). */
+export const statsAggregationCache = new TTLCache<unknown>({ ttlMs: 60_000, max: 32 })

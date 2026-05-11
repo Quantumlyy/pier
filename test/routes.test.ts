@@ -3,7 +3,7 @@ import { SiweMessage } from 'siwe'
 import { privateKeyToAccount } from 'viem/accounts'
 
 import { buildApp } from '../src/index.ts'
-import { ensCache } from '../src/lib/cache.ts'
+import { ensCache, statsAggregationCache } from '../src/lib/cache.ts'
 import {
   ensDomain,
   gqlOk,
@@ -20,6 +20,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   ensCache.clear()
+  statsAggregationCache.clear()
 })
 
 afterEach(() => {
@@ -668,7 +669,10 @@ describe('GET /domains/owner', () => {
 })
 
 describe('GET /total_stats', () => {
-  test('returns full TotalStatsType with zero defaults', async () => {
+  const ETH_PARENT = '0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae'
+
+  test('returns full TotalStatsType with zero defaults when ENSNode fails', async () => {
+    installFetch(() => gqlErr(503))
     const r = await json<Record<string, string>>(req.get('/total_stats'))
     expect(r.body).toEqual({
       average_sale: '0',
@@ -686,6 +690,69 @@ describe('GET /total_stats', () => {
       volume_day: '0',
       volume_month: '0',
       volume_week: '0',
+    })
+  })
+
+  test('merges ENSNode Ethereum .eth registration stats', async () => {
+    installFetch((cap) => {
+      const q = cap.body?.query ?? ''
+      if (q.includes('PierRecentRegs')) {
+        return gqlOk({
+          registrations: [
+            {
+              cost: '1000000000000000000',
+              registrationDate: '1700000000',
+              domain: {
+                name: 'foo.eth',
+                labelName: 'foo',
+                parent: { id: ETH_PARENT },
+              },
+            },
+          ],
+        })
+      }
+      if (q.includes('PierCostOrderedRegs')) {
+        return gqlOk({
+          registrations: [
+            {
+              cost: '5000000000000000000',
+              registrationDate: '1700000100',
+              domain: {
+                name: 'bar.eth',
+                labelName: 'bar',
+                parent: { id: ETH_PARENT },
+              },
+            },
+          ],
+        })
+      }
+      if (q.includes('PierVolRegs')) {
+        return gqlOk({
+          registrations: [
+            {
+              cost: '2000000000000000000',
+              registrationDate: String(Math.floor(Date.now() / 1000) - 3600),
+              domain: {
+                name: 'baz.eth',
+                labelName: 'baz',
+                parent: { id: ETH_PARENT },
+              },
+            },
+          ],
+        })
+      }
+      return gqlOk({ registrations: [] })
+    })
+
+    const r = await json<Record<string, string>>(req.get('/total_stats'))
+    expect(r.body).toMatchObject({
+      average_sale: '0',
+      volume_day: '0',
+      last_reg: '1000000000000000000',
+      last_reg_domain_name: 'foo.eth',
+      highest_reg: '5000000000000000000',
+      highest_reg_domain_name: 'bar.eth',
+      reg_volume_day: '2000000000000000000',
     })
   })
 })

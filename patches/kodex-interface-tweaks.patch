@@ -1,0 +1,103 @@
+diff --git a/.env.example b/.env.example
+index f12dfce9..e4e4d522 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,6 +1,8 @@
+ NEXT_PUBLIC_DEFAULT_SITE_ROOT=kodex.io
+ NEXT_PUBLIC_LEGACY_SITE_ROOT=beta.kodex.io
+ NEXT_PUBLIC_DEFAULT_CHAIN_ID=1
++NEXT_PUBLIC_RPC_URL=https://ethereum-rpc.publicnode.com
++NEXT_PUBLIC_RPC_WSS_URL=wss://ethereum-rpc.publicnode.com
+ NEXT_PUBLIC_SIWE_MESSAGE="Hi from Kodex!"
+ 
+ NEXT_PUBLIC_ALCHEMY_ETHEREUM_MAINNET_API_KEY=
+@@ -8,7 +10,7 @@ NEXT_PUBLIC_LLAMA_NODES_ETHEREUM_MAINNET_API_KEY=
+ NEXT_PUBLIC_FULL_STORY_ORGANISATION_ID=
+ NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=kodex-solutions
+ NEXT_PUBLIC_RESERVOIR_API_KEY=
+-NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=
++NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=94dfcc49a7e3e16eac1e6e671d10701a
+ 
+ NEXT_PUBLIC_DARK_MODE_DEFAULT=false
+ 
+@@ -20,7 +22,9 @@ NEXT_PUBLIC_ENS_ETH_REGISTRAR_CONTROLLER_ADDRESS=0x283Af0B28c62C092C9727F1Ee09c0
+ NEXT_PUBLIC_ENS_ETHUSD_PRICE_ORACLE_ADDRESS=0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419
+ NEXT_PUBLIC_KODEX_BULK_REGISTRAR_ADDRESS=0x946373124c353f25866d09fed05523b6a517239b
+ NEXT_PUBLIC_WRAPPED_NATIVE_ASSET_ADDRESS=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
++NEXT_PUBLIC_BULK_RENEWAL_ADDRESS=0xa12159e5131b1eEf6B4857EEE3e1954744b5033A
++NEXT_PUBLIC_ENS_TOKEN_WRAPPER_ADDRESS=0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401
+ 
+-NEXT_PUBLIC_JETTY_URL=https://jetty.kodex.io
++NEXT_PUBLIC_JETTY_URL=http://localhost:8000
+ NEXT_PUBLIC_VECTORISATION_URL=https://kodex-vectorization-model-v2.herokuapp.com
+-NEXT_PUBLIC_CMS_URL=https://cms.kodex.io
+\ No newline at end of file
++NEXT_PUBLIC_CMS_URL=https://cms.kodex.io
+diff --git a/app/constants/api/index.ts b/app/constants/api/index.ts
+index 971f1039..4fa0c014 100644
+--- a/app/constants/api/index.ts
++++ b/app/constants/api/index.ts
+@@ -1,4 +1,4 @@
+-export const JETTY_URL = 'https://jetty.kodex.io'
++export const JETTY_URL = process.env.NEXT_PUBLIC_JETTY_URL || 'https://jetty.kodex.io'
+ export const SIWE_STATEMENT = 'Hi from Kodex!'
+ export const APPRAISER_URL = 'https://appraiser.kodex.io/'
+ export const RESERVOIR_URL = 'https://reservoir.kodex.io'
+diff --git a/app/lib/core/config.ts b/app/lib/core/config.ts
+index 6eb73333..d9b130f6 100644
+--- a/app/lib/core/config.ts
++++ b/app/lib/core/config.ts
+@@ -20,9 +20,9 @@ export const configSchema = z.object({
+     .string()
+     .optional()
+     .default(SUBGRAPH_KODEX_ENS_URL_DEFAULT),
+-  reservoirApiKey: z.string(),
+-  posthogApiKey: z.string(),
+-  posthogHost: z.string(),
++  reservoirApiKey: z.string().optional(),
++  posthogApiKey: z.string().optional(),
++  posthogHost: z.string().optional(),
+ 
+   walletConnectProjectId: z.string(),
+ 
+diff --git a/app/lib/core/wallets.ts b/app/lib/core/wallets.ts
+index c406e3ee..cc28813d 100644
+--- a/app/lib/core/wallets.ts
++++ b/app/lib/core/wallets.ts
+@@ -10,8 +10,8 @@ export const { chains, publicClient, webSocketPublicClient } = configureChains(
+   [
+     jsonRpcProvider({
+       rpc: () => ({
+-        http: `https://rpc.kodex.io/rpc`,
+-        webSocket: `wss://rpc.kodex.io/rpc`,
++        http: process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.kodex.io/rpc',
++        webSocket: process.env.NEXT_PUBLIC_RPC_WSS_URL || `wss://rpc.kodex.io/rpc`,
+       }),
+       // rpc: () => ({
+       //   http: `https://eth.llamarpc.com/rpc/${config.llamanodesApiKey}`,
+diff --git a/app/utils/web3/getEtherPrice.ts b/app/utils/web3/getEtherPrice.ts
+index e133362d..320e07ad 100644
+--- a/app/utils/web3/getEtherPrice.ts
++++ b/app/utils/web3/getEtherPrice.ts
+@@ -8,7 +8,7 @@ export const getEtherPrice = async (short?: boolean) => {
+   try {
+     const client = createPublicClient({
+       chain: mainnet,
+-      transport: http('https://rpc.kodex.io/rpc'),
++      transport: http(process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.kodex.io/rpc'),
+     })
+ 
+     const contract = getContract({
+diff --git a/app/utils/web3/web3.ts b/app/utils/web3/web3.ts
+index 1c17bea6..4e4b625f 100644
+--- a/app/utils/web3/web3.ts
++++ b/app/utils/web3/web3.ts
+@@ -12,7 +12,7 @@ import { RegistrarControllerAbi } from '@/app/constants/abi/RegistrarControllerA
+ export const getPublicClient = () => {
+   const client = createPublicClient({
+     chain: mainnet,
+-    transport: http(`https://rpc.kodex.io/rpc`),
++    transport: http(process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.kodex.io/rpc'),
+   })
+ 
+   return client

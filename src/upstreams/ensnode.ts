@@ -1,5 +1,6 @@
 import { env } from '../env.ts'
-import { ensCache } from '../lib/cache.ts'
+import { ensCache, statsAggregationCache } from '../lib/cache.ts'
+import { parseWeiBigInt, weiBigIntToApiString, weiRawToApiString } from '../lib/wei.ts'
 import { type DomainStatus, effectiveOwner } from '../lib/shape.ts'
 import type { ENSNodeDomain } from '../lib/types.ts'
 
@@ -339,3 +340,177 @@ export const getDomainByName = (name: string): Promise<ENSNodeDomain | null> =>
     const data = await gql<{ domains: ENSNodeDomain[] }>(GET_DOMAIN_BY_NAME, { name })
     return filterDisplayable(data.domains)[0] ?? null
   })
+
+// ─── Ethereum mainnet .eth 2LD registration metrics (ENS subgraph via ENSNode) ───
+
+type RegistrationDomainSlice = {
+  name: string | null
+  labelName: string | null
+  parent: { id: string } | null
+}
+
+type RegistrationRow = {
+  cost: string | null
+  registrationDate: string
+  domain: RegistrationDomainSlice | null
+}
+
+/** Same parent filter as `Domain.parentId` search — direct children of `eth`. */
+const isEthTwoLdRegistration = (r: RegistrationRow): boolean => {
+  const d = r.domain
+  if (!d?.parent?.id) return false
+  if (d.parent.id.toLowerCase() !== ETH_NODE.toLowerCase()) return false
+  const name = d.name
+  if (!name || !name.endsWith('.eth')) return false
+  if (name.split('.').length !== 2) return false
+  const label = d.labelName ?? name.slice(0, -'.eth'.length)
+  if (!label || label.startsWith('[')) return false
+  return true
+}
+
+const Q_RECENT_REGS = `
+query PierRecentRegs($first: Int!, $skip: Int!) {
+  registrations(
+    orderBy: registrationDate
+    orderDirection: desc
+    first: $first
+    skip: $skip
+  ) {
+    cost
+    registrationDate
+    domain {
+      name
+      labelName
+      parent { id }
+    }
+  }
+}`
+
+const Q_COST_ORDERED = `
+query PierCostOrderedRegs($since: BigInt!, $first: Int!, $skip: Int!) {
+  registrations(
+    where: { registrationDate_gte: $since }
+    orderBy: cost
+    orderDirection: desc
+    first: $first
+    skip: $skip
+  ) {
+    cost
+    registrationDate
+    domain {
+      name
+      labelName
+      parent { id }
+    }
+  }
+}`
+
+const Q_VOL_REGS = `
+query PierVolRegs($since: BigInt!, $first: Int!, $skip: Int!) {
+  registrations(
+    where: { registrationDate_gte: $since }
+    orderBy: registrationDate
+    orderDirection: asc
+    first: $first
+    skip: $skip
+  ) {
+    cost
+    registrationDate
+    domain {
+      name
+      labelName
+      parent { id }
+    }
+  }
+}`
+
+const PAGE = 100
+const MAX_LAST_PAGES = 15
+const MAX_HIGH_PAGES = 10
+const MAX_VOL_PAGES = 40
+
+export type EthRegistrationStats = {
+  reg_volume_day: string
+  last_reg: string
+  last_reg_domain_name: string
+  highest_reg: string
+  highest_reg_domain_name: string
+}
+
+async function latestEthTwoLdRegistration(): Promise<{ wei: string; name: string }> {
+  for (let page = 0; page < MAX_LAST_PAGES; page++) {
+    const data = await gql<{ registrations: RegistrationRow[] }>(Q_RECENT_REGS, {
+      first: PAGE,
+      skip: page * PAGE,
+    })
+    const hit = data.registrations.find(isEthTwoLdRegistration)
+    if (hit) {
+      return {
+        wei: weiRawToApiString(hit.cost),
+        name: hit.domain?.name ?? '',
+      }
+    }
+    if (data.registrations.length < PAGE) break
+  }
+  return { wei: '0', name: '' }
+}
+
+async function highestEthTwoLdSince(sinceSec: number): Promise<{ wei: string; name: string }> {
+  const since = String(sinceSec)
+  for (let page = 0; page < MAX_HIGH_PAGES; page++) {
+    const data = await gql<{ registrations: RegistrationRow[] }>(Q_COST_ORDERED, {
+      since,
+      first: PAGE,
+      skip: page * PAGE,
+    })
+    const hit = data.registrations.find(isEthTwoLdRegistration)
+    if (hit) {
+      return {
+        wei: weiRawToApiString(hit.cost),
+        name: hit.domain?.name ?? '',
+      }
+    }
+    if (data.registrations.length < PAGE) break
+  }
+  return { wei: '0', name: '' }
+}
+
+async function ethTwoLdVolumeWeiSince(sinceSec: number): Promise<bigint> {
+  const since = String(sinceSec)
+  let sum = 0n
+  for (let page = 0; page < MAX_VOL_PAGES; page++) {
+    const data = await gql<{ registrations: RegistrationRow[] }>(Q_VOL_REGS, {
+      since,
+      first: PAGE,
+      skip: page * PAGE,
+    })
+    for (const r of data.registrations) {
+      if (!isEthTwoLdRegistration(r)) continue
+      sum += parseWeiBigInt(r.cost)
+    }
+    if (data.registrations.length < PAGE) break
+  }
+  return sum
+}
+
+/** Rolling 24h volume + latest/maxes for Ethereum `*.eth` 2LDs (excludes L2 TLDs like `.base.eth`). Cached 60s via `statsAggregationCache` (not `ensCache` — 30s TTL would expire halfway through a “minute bucket”). */
+export const fetchEthRegistrationStats = (): Promise<EthRegistrationStats> =>
+  statsAggregationCache.getOrSet('fetchEthRegistrationStats', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const dayStart = nowSec - 86_400
+    const monthStart = nowSec - 30 * 86_400
+
+    const [last, hi, volWei] = await Promise.all([
+      latestEthTwoLdRegistration(),
+      highestEthTwoLdSince(monthStart),
+      ethTwoLdVolumeWeiSince(dayStart),
+    ])
+
+    return {
+      reg_volume_day: weiBigIntToApiString(volWei),
+      last_reg: last.wei,
+      last_reg_domain_name: last.name,
+      highest_reg: hi.wei,
+      highest_reg_domain_name: hi.name,
+    }
+  }) as Promise<EthRegistrationStats>

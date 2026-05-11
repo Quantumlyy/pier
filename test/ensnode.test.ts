@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import { ensCache } from '../src/lib/cache.ts'
+import { ensCache, statsAggregationCache } from '../src/lib/cache.ts'
 import {
   getDomainByName,
   getDomainsByOwner,
@@ -36,6 +36,7 @@ const err = (status: number, body: unknown = { message: 'upstream error' }) =>
 
 beforeEach(() => {
   ensCache.clear()
+  statsAggregationCache.clear()
 })
 
 afterEach(() => {
